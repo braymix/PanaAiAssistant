@@ -1,0 +1,12 @@
+# Argo — runtime. Python 3.12 sul PC di produzione (qui testato su 3.11).
+claude-agent-sdk==0.2.120
+fastapi
+uvicorn[standard]
+jinja2
+anyio
+httpx
+pywebpush
+py-vapid
+
+# sviluppo/test
+pytest

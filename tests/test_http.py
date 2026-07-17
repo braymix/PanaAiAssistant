@@ -1,0 +1,64 @@
+"""M1: health, auth d'identita' (regola 4.2), asset PWA pubblici."""
+
+from fastapi.testclient import TestClient
+
+import app.config as config
+from app.main import create_app
+
+
+def test_healthz_ok(client):
+    r = client.get("/healthz")
+    assert r.status_code == 200 and r.json()["status"] == "ok"
+
+
+def test_dashboard_ok_with_dev_identity(client):
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "Argo" in r.text
+
+
+def test_manifest_and_sw_public(client):
+    assert client.get("/manifest.webmanifest").status_code == 200
+    assert client.get("/sw.js").status_code == 200
+
+
+def test_direct_hit_without_identity_rejected(db, settings):
+    """Senza header d'identita' e senza dev-flag: 401 (regola 4.2).
+
+    Simula il colpo diretto sulla LAN che salterebbe Tailscale Serve.
+    """
+    strict = config.Settings(
+        db_path=settings.db_path, repo_roots=settings.repo_roots,
+        dev_allow_no_identity=False,
+    )
+    config.set_settings(strict)
+    app = create_app()
+    with TestClient(app) as c:
+        assert c.get("/").status_code == 401
+        # ma gli asset pubblici e health restano raggiungibili
+        assert c.get("/healthz").status_code == 200
+        assert c.get("/manifest.webmanifest").status_code == 200
+    config.set_settings(settings)
+
+
+def test_via_rejects_plan_without_verify(client, monkeypatch):
+    """Il PlanDocument e' rifiutato se un task e' privo di verify_cmd (§5.2).
+
+    Mocka il planner per non dipendere dall'SDK/abbonamento: restituisce un piano
+    con un task senza verify_cmd -> generate_plan deve sollevare -> HTTP 422.
+    """
+    import app.planner as planner
+    from app.briefs import PlanDocument, validate_plan
+
+    async def fake_generate_plan(conversation_id, repo_path, resume_session=None):
+        plan = PlanDocument.from_dict({"repo_path": repo_path, "tasks": [
+            {"id": "t1", "title": "x", "instructions": "y",
+             "files_allowed": ["a.py"], "verify_cmd": ""}]})
+        validate_plan(plan)  # solleva PlanValidationError
+        return "unreachable"
+
+    monkeypatch.setattr(planner, "generate_plan", fake_generate_plan)
+    r = client.post("/plans/via",
+                    json={"conversation_id": "c1", "repo_path": "/r"})
+    assert r.status_code == 422
+    assert "verify_cmd" in r.json()["detail"]

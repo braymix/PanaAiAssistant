@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Argo · piano{% endblock %}
+{% block content %}
+<h2>Approva il piano</h2>
+<p class="muted">{{ summary }}</p>
+
+<!-- §3.2: mostra i file che verranno toccati: e' QUELLO che stai approvando -->
+<h3>File nel perimetro</h3>
+<ul class="files">
+  {% for f in all_files %}<li><code>{{ f }}</code></li>{% endfor %}
+</ul>
+
+<h3>Task ({{ tasks|length }})</h3>
+<ol class="tasks">
+  {% for b in briefs %}
+  <li>
+    <div class="t-title">{{ b['title'] }}</div>
+    <div class="t-verify">verify: <code>{{ b['verify_cmd'] }}</code></div>
+    <div class="t-files">{{ b['files_allowed']|join(', ') }}</div>
+    {% if b['depends_on'] %}<div class="t-deps">dopo: {{ b['depends_on']|join(', ') }}</div>{% endif %}
+  </li>
+  {% endfor %}
+</ol>
+{% endblock %}
+{% block footer %}
+<div class="actionbar two">
+  <a class="btn ghost wide" href="/chat/{{ plan['conversation_id'] }}">Torna</a>
+  <button class="btn primary wide" id="approve" data-plan="{{ plan['id'] }}">Esegui</button>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  document.getElementById('approve').onclick = function () {
+    Argo.approvePlan(this.dataset.plan);
+  };
+</script>
+{% endblock %}

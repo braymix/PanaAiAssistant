@@ -13,8 +13,12 @@ __pycache__/
 venv/
 *.egg-info/
 
-# SQLite (fasi successive)
+# SQLite
 *.db
 *.db-wal
 *.db-shm
 artifacts/
+sandbox_repos/
+
+# chiavi VAPID dell'app (root) — mai committare
+vapid_keys.json
