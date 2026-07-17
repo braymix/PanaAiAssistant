@@ -53,6 +53,10 @@ class Settings:
     # --- approvazioni (regola 4.6: il timeout NEGA) -----------------------------
     approval_timeout_s: int = int(os.environ.get("ARGO_APPROVAL_TIMEOUT_S", "300"))
 
+    # --- display costo: il costo dall'SDK e' in USD ed e' STIMATO (equivalente
+    # API), non un addebito reale sull'abbonamento. Lo mostriamo in EUR. --------
+    usd_to_eur: float = float(os.environ.get("ARGO_USD_EUR", "0.92"))
+
     # --- allowlist comandi Bash per il PolicyGate (§3.2) ------------------------
     # prefissi consentiti senza chiedere al telefono. Tutto il resto -> push.
     bash_allowlist: list[str] = field(

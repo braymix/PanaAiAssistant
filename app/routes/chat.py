@@ -16,7 +16,8 @@ router = APIRouter(prefix="/chat")
 class NewConversation(BaseModel):
     title: str = "Nuova conversazione"
     repo_path: str = ""
-    plan_mode: bool = True   # ON di default (§3.1)
+    plan_mode: bool = True         # ON di default (§3.1)
+    mode: str = "generic"          # 'generic' | 'research'
 
 
 class ChatMessage(BaseModel):
@@ -29,11 +30,16 @@ class ChatMessage(BaseModel):
 @router.post("/new")
 async def new_conversation(body: NewConversation):
     cid = new_id("conv")
+    mode = body.mode if body.mode in ("generic", "research") else "generic"
+    title = body.title
+    if title == "Nuova conversazione" and mode == "research":
+        title = "Ricerca online"
     get_db().execute(
-        "INSERT INTO conversation(id, title, plan_mode, created_at) VALUES(?,?,?,?)",
-        (cid, body.title, 1 if body.plan_mode else 0, utcnow()),
+        "INSERT INTO conversation(id, title, plan_mode, created_at, mode) "
+        "VALUES(?,?,?,?,?)",
+        (cid, title, 1 if body.plan_mode else 0, utcnow(), mode),
     )
-    return {"conversation_id": cid}
+    return {"conversation_id": cid, "mode": mode}
 
 
 @router.post("/send")

@@ -30,10 +30,14 @@ class _Init:
         self.data = {"session_id": session_id}
 
 
+seen_system: list = []
+
+
 class FakePlannerClient:
     def __init__(self, options=None):
         self.options = options
         seen_resume.append(getattr(options, "resume", None))
+        seen_system.append(getattr(options, "system_prompt", None))
         _counter["n"] += 1
         self._sid = f"sess-{_counter['n']}"
 
@@ -100,6 +104,45 @@ def test_generate_plan_forces_repo_and_reroots_files(db, settings, roots):
     # files_allowed ri-radicati (solo nome file) e verify_cwd assoluto -> "."
     assert raw["tasks"][0]["files_allowed"] == ["intro.md"]
     assert raw["tasks"][0]["verify_cwd"] == "."
+
+
+def test_research_mode_appends_web_research_prompt(db):
+    import asyncio
+    from app.planner import chat_stream, set_client_cls
+
+    seen_system.clear()
+    seen_resume.clear()
+    _counter["n"] = 0
+    set_client_cls(FakePlannerClient)
+    try:
+        cid = new_id("conv")
+        db.execute(
+            "INSERT INTO conversation(id, title, plan_mode, created_at, mode) "
+            "VALUES(?,?,?,?,?)", (cid, "r", 1, utcnow(), "research"))
+        asyncio.run(chat_stream(cid, ".", "cerca X"))
+        sp = seen_system[-1]
+        assert isinstance(sp, dict) and sp.get("type") == "preset"
+        assert "RICERCA" in sp.get("append", "")
+    finally:
+        set_client_cls(None)
+
+
+def test_generic_mode_no_custom_system_prompt(db):
+    import asyncio
+    from app.planner import chat_stream, set_client_cls
+
+    seen_system.clear()
+    _counter["n"] = 0
+    set_client_cls(FakePlannerClient)
+    try:
+        cid = new_id("conv")
+        db.execute(
+            "INSERT INTO conversation(id, title, plan_mode, created_at, mode) "
+            "VALUES(?,?,?,?,?)", (cid, "g", 1, utcnow(), "generic"))
+        asyncio.run(chat_stream(cid, ".", "fai Y"))
+        assert seen_system[-1] is None   # generica: nessun prompt custom
+    finally:
+        set_client_cls(None)
 
 
 def test_planner_session_persisted_and_resumed(db):

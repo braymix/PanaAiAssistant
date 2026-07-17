@@ -80,6 +80,19 @@ def test_plan_status_404(client):
     assert client.get("/plans/nope/status").status_code == 404
 
 
+def test_new_research_conversation_stores_mode(client, db):
+    r = client.post("/chat/new", json={"mode": "research"})
+    assert r.status_code == 200 and r.json()["mode"] == "research"
+    cid = r.json()["conversation_id"]
+    row = db.query_one("SELECT title, mode FROM conversation WHERE id=?", (cid,))
+    assert row["mode"] == "research" and row["title"] == "Ricerca online"
+
+
+def test_stats_reports_euro(client):
+    body = client.get("/stats").json()
+    assert "cost_today_eur" in body
+
+
 def test_via_rejects_plan_without_verify(client, monkeypatch):
     """Il PlanDocument e' rifiutato se un task e' privo di verify_cmd (§5.2).
 

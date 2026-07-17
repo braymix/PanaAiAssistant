@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .config import get_settings
 from .db import get_db, utcnow
 
 
@@ -21,9 +22,12 @@ def snapshot(pushes_sent: int = 0, ollama_queue: int = 0) -> dict:
         return db.query_one(
             "SELECT COUNT(*) c FROM task WHERE status=?", (status,))["c"]
 
+    rate = get_settings().usd_to_eur
+    cost_usd = cost_today or 0.0
     return {
         "active_runs": active_runs,
-        "cost_today": round(cost_today or 0.0, 4),
+        "cost_today": round(cost_usd, 4),                 # USD, stimato
+        "cost_today_eur": round(cost_usd * rate, 2),      # EUR, stimato
         "pending_approvals": pending,
         "ollama_queue": ollama_queue,
         "pushes_sent": pushes_sent,          # = qualita' del piano (§3.2)

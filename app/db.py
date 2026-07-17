@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS project(
 );
 
 CREATE TABLE IF NOT EXISTS conversation(
-  id TEXT PRIMARY KEY, title TEXT, plan_mode INTEGER, created_at TEXT
+  id TEXT PRIMARY KEY, title TEXT, plan_mode INTEGER, created_at TEXT,
+  mode TEXT DEFAULT 'generic'      -- 'generic' | 'research'
 );
 
 CREATE TABLE IF NOT EXISTS message(
@@ -87,6 +88,15 @@ class Database:
         self._init_pragmas()
         self._conn.executescript(SCHEMA)
         self._conn.commit()
+        self._migrate()
+
+    def _migrate(self) -> None:
+        # aggiunte additive di colonne su DB gia' esistenti (CREATE IF NOT EXISTS
+        # non le aggiunge). Ignora l'errore se la colonna c'e' gia'.
+        cols = [r["name"] for r in self.query("PRAGMA table_info(conversation)")]
+        if "mode" not in cols:
+            self.execute(
+                "ALTER TABLE conversation ADD COLUMN mode TEXT DEFAULT 'generic'")
 
     def _init_pragmas(self) -> None:
         cur = self._conn.cursor()

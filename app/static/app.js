@@ -15,7 +15,7 @@ const Argo = (() => {
     async function tick() {
       try {
         const s = await (await fetch('/stats')).json();
-        set('s-active', s.active_runs); set('s-cost', '$' + s.cost_today);
+        set('s-active', s.active_runs); set('s-cost', '€' + s.cost_today_eur);
         set('s-queue', s.ollama_queue); set('s-pending', s.pending_approvals);
         set('s-done', s.tasks_done); set('s-failed', s.tasks_failed);
         set('s-esc', s.tasks_escalated); set('s-push', s.pushes_sent);
@@ -148,10 +148,10 @@ const Argo = (() => {
     } catch (e) { alert(e.message); }
   }
 
-  async function newChatWithProject() {
+  async function newChatWithProject(mode) {
     const sel = document.getElementById('project');
     const repo = sel ? sel.value : '';
-    const r = await jpost('/chat/new', { repo_path: repo });
+    const r = await jpost('/chat/new', { repo_path: repo, mode: mode || 'generic' });
     const q = repo ? ('?repo=' + encodeURIComponent(repo)) : '';
     location.href = '/chat/' + r.conversation_id + q;
   }

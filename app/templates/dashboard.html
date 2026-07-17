@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Argo · dashboard{% endblock %}
+{% block title %}Argo · home{% endblock %}
 {% block content %}
 
 <!-- M5: stats live, leggibili in 2 secondi (§4.14) -->
 <section class="stats" id="stats" aria-live="polite">
   <div class="stat"><span class="k" id="s-active">–</span><span class="l">run attivi</span></div>
-  <div class="stat"><span class="k" id="s-cost">$–</span><span class="l">oggi</span></div>
+  <div class="stat"><span class="k" id="s-cost">€–</span><span class="l">oggi (stima)</span></div>
   <div class="stat"><span class="k" id="s-queue">–</span><span class="l">coda Ollama</span></div>
   <div class="stat"><span class="k" id="s-pending">–</span><span class="l">approv. pend.</span></div>
   <div class="stat"><span class="k" id="s-done">–</span><span class="l">task done</span></div>
@@ -23,6 +23,21 @@
   <button class="btn ghost" id="add-project">Aggiungi</button>
 </details>
 
+<!-- due modi per aprire la chat (= tutto il sistema planner+executor) -->
+<h2>Apri una chat</h2>
+<div class="mode-cards">
+  <button class="mode-card research" id="new-research">
+    <span class="mc-icon">🔎</span>
+    <span class="mc-title">Ricerca online</span>
+    <span class="mc-sub">cerca sul web, verifica le fonti, produce un documento</span>
+  </button>
+  <button class="mode-card generic" id="new-generic">
+    <span class="mc-icon">💬</span>
+    <span class="mc-title">Generica</span>
+    <span class="mc-sub">pianifica ed esegue qualsiasi task di coding/scrittura</span>
+  </button>
+</div>
+
 {% if plans %}
 <h2>Piani recenti</h2>
 <ul class="list">
@@ -36,7 +51,8 @@
 <h2>Conversazioni</h2>
 <ul class="list">
   {% for c in conversations %}
-  <li><a href="/chat/{{ c['id'] }}">{{ c['title'] }}</a></li>
+  <li><a href="/chat/{{ c['id'] }}">
+    {% if c['mode'] == 'research' %}🔎 {% endif %}{{ c['title'] }}</a></li>
   {% else %}
   <li class="muted">Nessuna conversazione.</li>
   {% endfor %}
@@ -46,11 +62,10 @@
 
 {% endblock %}
 {% block footer %}
-<!-- azioni primarie nel terzo inferiore (§4.11) -->
+<!-- azioni secondarie in basso (§4.11) -->
 <div class="actionbar">
   <button class="btn ghost" id="install">Installa PWA</button>
-  <button class="btn" id="enable-push">Attiva push</button>
-  <button class="btn primary" id="new-chat">Nuova chat</button>
+  <button class="btn ghost" id="enable-push">Attiva push</button>
 </div>
 {% endblock %}
 {% block scripts %}
@@ -59,7 +74,8 @@
   Argo.subscribeGlobal((ev) => Argo.appendLog('live-log', ev));
   Argo.loadProjects();
   document.getElementById('add-project').onclick = Argo.addProject;
-  document.getElementById('new-chat').onclick = Argo.newChatWithProject;
+  document.getElementById('new-research').onclick = () => Argo.newChatWithProject('research');
+  document.getElementById('new-generic').onclick = () => Argo.newChatWithProject('generic');
   document.getElementById('enable-push').onclick = Argo.enablePush;
   Argo.wireInstall('install');
 </script>
