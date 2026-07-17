@@ -15,8 +15,11 @@ $env:ARGO_ROOTS = (Split-Path $PSScriptRoot -Parent)
 # (SOLO in locale; con l'app esposta su Tailscale togli questa riga)
 $env:ARGO_DEV_ALLOW_NO_IDENTITY = "1"
 
-# --- modello Ollama per gli executor: usa il TAG ESATTO che hai (ollama list) ---
-$env:ARGO_OLLAMA_MODEL = "qwen3-coder:30b"
+# --- modello Ollama per gli executor: DEVE stare nella VRAM (RTX 3080 Ti = 12 GB) ---
+# qwen3-coder:30b (18 GB) NON ci sta -> lento e va in loop. qwen2.5-coder:14b (9 GB) si'.
+$env:ARGO_OLLAMA_MODEL = "qwen2.5-coder:14b"
+# se vedi ancora lentezza/loop, abbassa il contesto (meno VRAM per la KV cache):
+# $env:OLLAMA_CONTEXT_LENGTH = "32768"
 
 # --- chiavi push, se le hai generate (opzionale) ---
 $vapid = Join-Path $PSScriptRoot "gates\gate0_push\vapid_keys.json"
