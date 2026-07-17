@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import platform
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from .backends import make_planner_options, make_via_options
@@ -40,10 +41,17 @@ VIA_SYSTEM = (
     '{"id","title","depends_on":[],"files_allowed":[...],"context","instructions",'
     '"acceptance","verify_cmd","verify_cwd":".","max_turns":25,"timeout_s":900}\n'
     "REGOLE FERREE:\n"
-    "- verify_cmd e' OBBLIGATORIO ed eseguibile (es. 'pytest tests/x.py -q'). "
-    "Un task senza verify_cmd fa RIFIUTARE tutto il piano.\n"
-    "- files_allowed elenca ESATTAMENTE i file che il task puo' toccare: e' il "
-    "perimetro che l'umano approva. Non lasciarlo vuoto.\n"
+    "- verify_cmd e' OBBLIGATORIO ed eseguibile. Un task senza verify_cmd fa "
+    "RIFIUTARE tutto il piano.\n"
+    "- verify_cmd DEVE essere CROSS-PLATFORM e girare sul sistema operativo "
+    "dell'utente (te lo dico nel messaggio). NON usare comandi Unix come test, "
+    "grep, ls, cat, [ -f ], head: su Windows NON esistono e falliscono sempre. "
+    "Usa SEMPRE Python (garantito). Per verificare un file di testo:\n"
+    "  python -c \"import sys,pathlib; t=pathlib.Path('FILE.md').read_text("
+    "encoding='utf-8'); sys.exit(0 if ('Titolo' in t and 'Sezione' in t) else 1)\"\n"
+    "  Per codice: 'python -m pytest tests/x.py -q'.\n"
+    "- files_allowed elenca ESATTAMENTE i file che il task puo' toccare (percorsi "
+    "RELATIVI a repo_path): e' il perimetro che l'umano approva. Non vuoto.\n"
     "- Lo eseguira' un modello locale stupido e letterale: context e instructions "
     "devono essere completi, passo-passo, imperativi, zero ambiguita'.\n"
     "- depends_on referenzia altri id dello stesso piano.\n"
@@ -222,6 +230,9 @@ async def generate_plan(conversation_id: str, repo_path: str,
     async with _get_client_cls()(options=options) as client:
         await client.query(
             f"Genera ORA il PlanDocument JSON per la feature discussa.\n"
+            f"Sistema operativo dell'utente: {platform.system()}. Ogni verify_cmd "
+            f"DEVE funzionare qui: se Windows, NIENTE test/grep/ls/cat, usa "
+            f"python -c \"...\" (vedi regole).\n"
             f"repo_path DEVE essere ESATTAMENTE: {repo_path}\n"
             f"In files_allowed usa SOLO percorsi RELATIVI a repo_path (es. "
             f"'CASO_GARLASCO.md' o 'sezioni/intro.md'), MAI percorsi assoluti e "
