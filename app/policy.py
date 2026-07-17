@@ -10,6 +10,7 @@ Auto-allow != no-gate: il gate gira SEMPRE (anti-pattern §8).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -32,6 +33,26 @@ def cmd_matches_allowlist(command: str, allowlist: list[str]) -> bool:
     return any(c == pfx or c.startswith(pfx + " ") for pfx in allowlist)
 
 
+# Strato deterministico (§8): questi non si auto-permettono e non si girano
+# ciecamente all'umano — si negano. E' il "buon secondo strato" oltre al gate umano.
+_DANGEROUS = [
+    re.compile(r"\brm\s+(-\w*\s+)*-\w*[rf]", re.I),   # rm -rf / rm -fr ...
+    re.compile(r":\(\)\s*\{.*\|.*&\s*\}\s*;", re.I),  # fork bomb
+    re.compile(r"\bmkfs\b", re.I),
+    re.compile(r"\bdd\b.*\bof=/dev/", re.I),
+    re.compile(r">\s*/dev/sd[a-z]", re.I),
+    re.compile(r"\bgit\s+push\b.*--force(?!-with-lease)", re.I),
+    re.compile(r"\bgit\s+push\b.*\s-f(\s|$)", re.I),
+    re.compile(r"\b(curl|wget)\b.*\|\s*(sudo\s+)?(sh|bash)\b", re.I),  # curl|sh
+    re.compile(r"\bchmod\s+-R\s+777\b", re.I),
+    re.compile(r"\bshutdown\b|\breboot\b", re.I),
+]
+
+
+def is_dangerous_bash(command: str) -> bool:
+    return any(p.search(command) for p in _DANGEROUS)
+
+
 def evaluate(tool_name: str, tool_input: dict, files_allowed: set[Path],
              roots: list[Path], bash_allowlist: list[str]) -> tuple[str, str]:
     """Ritorna ('allow'|'deny'|'ask', motivo). Nessun effetto collaterale."""
@@ -49,6 +70,9 @@ def evaluate(tool_name: str, tool_input: dict, files_allowed: set[Path],
 
     if tool_name == "Bash":
         cmd = tool_input.get("command", "")
+        if is_dangerous_bash(cmd):
+            # deny deterministico, prima di tutto (§8, secondo strato)
+            return "deny", "comando distruttivo bloccato dalla policy deterministica"
         if cmd_matches_allowlist(cmd, bash_allowlist):
             return "allow", "comando in allowlist"
         return "ask", "comando fuori allowlist"
