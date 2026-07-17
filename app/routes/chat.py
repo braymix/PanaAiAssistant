@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from ..db import get_db, utcnow
@@ -40,6 +40,18 @@ async def new_conversation(body: NewConversation):
         (cid, title, 1 if body.plan_mode else 0, utcnow(), mode),
     )
     return {"conversation_id": cid, "mode": mode}
+
+
+@router.delete("/{conversation_id}")
+async def delete_conversation(conversation_id: str):
+    """Elimina una chat: conversazione + messaggi. NON tocca `event` (append-only,
+    regola 4.4) ne' i piani gia' generati (restano nello storico)."""
+    db = get_db()
+    if not db.query_one("SELECT id FROM conversation WHERE id=?", (conversation_id,)):
+        raise HTTPException(status_code=404, detail="conversazione inesistente")
+    db.execute("DELETE FROM message WHERE conversation_id=?", (conversation_id,))
+    db.execute("DELETE FROM conversation WHERE id=?", (conversation_id,))
+    return {"status": "deleted"}
 
 
 @router.post("/send")

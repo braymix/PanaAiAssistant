@@ -93,6 +93,23 @@ def test_stats_reports_euro(client):
     assert "cost_today_eur" in body
 
 
+def test_delete_conversation(client, db):
+    cid = client.post("/chat/new", json={}).json()["conversation_id"]
+    db.execute("INSERT INTO message(conversation_id, role, content, ts) "
+               "VALUES(?,?,?,?)", (cid, "user", "ciao", "t"))
+    r = client.request("DELETE", f"/chat/{cid}")
+    assert r.status_code == 200
+    assert db.query_one("SELECT id FROM conversation WHERE id=?", (cid,)) is None
+    assert db.query("SELECT id FROM message WHERE conversation_id=?", (cid,)) == []
+    assert client.request("DELETE", f"/chat/{cid}").status_code == 404
+
+
+def test_ollama_ps_handles_ollama_down(client):
+    # Ollama non gira nei test: l'endpoint deve rispondere con un errore gestito
+    body = client.get("/ollama/ps").json()
+    assert "error" in body or "models" in body
+
+
 def test_via_rejects_plan_without_verify(client, monkeypatch):
     """Il PlanDocument e' rifiutato se un task e' privo di verify_cmd (§5.2).
 

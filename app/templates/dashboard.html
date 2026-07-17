@@ -51,8 +51,11 @@
 <h2>Conversazioni</h2>
 <ul class="list">
   {% for c in conversations %}
-  <li><a href="/chat/{{ c['id'] }}">
-    {% if c['mode'] == 'research' %}🔎 {% endif %}{{ c['title'] }}</a></li>
+  <li class="row" data-conv="{{ c['id'] }}">
+    <a class="row-main" href="/chat/{{ c['id'] }}">
+      {% if c['mode'] == 'research' %}🔎 {% endif %}{{ c['title'] }}</a>
+    <button class="del" title="Elimina" onclick="Argo.deleteChat('{{ c['id'] }}', event)">🗑</button>
+  </li>
   {% else %}
   <li class="muted">Nessuna conversazione.</li>
   {% endfor %}
@@ -65,7 +68,8 @@
 <!-- azioni secondarie in basso (§4.11) -->
 <div class="actionbar">
   <button class="btn ghost" id="install">Installa PWA</button>
-  <button class="btn ghost" id="enable-push">Attiva push</button>
+  <button class="btn ghost" id="enable-push">Push</button>
+  <a class="btn ghost" href="/ollama">Log Ollama</a>
 </div>
 {% endblock %}
 {% block scripts %}

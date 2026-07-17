@@ -56,6 +56,11 @@ async def plan_page(request: Request, plan_id: str):
     })
 
 
+@router.get("/ollama", response_class=HTMLResponse)
+async def ollama_page(request: Request):
+    return templates.TemplateResponse(request, "ollama.html", {"request": request})
+
+
 @router.get("/runs/{run_id}", response_class=HTMLResponse)
 async def run_page(request: Request, run_id: str):
     db = get_db()
