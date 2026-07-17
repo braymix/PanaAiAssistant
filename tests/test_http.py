@@ -57,6 +57,29 @@ def test_project_outside_root_rejected(client, tmp_path):
     assert r.status_code == 422
 
 
+def test_plan_status_endpoint(client, db):
+    import json as _json
+    from app.db import utcnow
+    db.execute(
+        "INSERT INTO plan_document(id, conversation_id, status, raw_json, created_at) "
+        "VALUES(?,?,?,?,?)",
+        ("plan-1", "c1", "executing", _json.dumps({"tasks": []}), utcnow()))
+    db.execute(
+        "INSERT INTO task(id, plan_id, seq, title, brief_json, status, backend, attempts) "
+        "VALUES(?,?,?,?,?,?,?,?)",
+        ("task-1", "plan-1", 0, "T1", "{}", "running", "ollama", 1))
+    r = client.get("/plans/plan-1/status")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["plan_status"] == "executing"
+    assert body["tasks"][0]["title"] == "T1" and body["tasks"][0]["status"] == "running"
+    assert body["pending_approvals"] == []
+
+
+def test_plan_status_404(client):
+    assert client.get("/plans/nope/status").status_code == 404
+
+
 def test_via_rejects_plan_without_verify(client, monkeypatch):
     """Il PlanDocument e' rifiutato se un task e' privo di verify_cmd (§5.2).
 

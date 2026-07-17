@@ -108,5 +108,15 @@ h3 { font-size: 15px; margin: 16px 0 6px; color: var(--muted); }
 .files, .tasks { padding-left: 18px; }
 .tasks li { background: var(--panel); border: 1px solid var(--line);
   border-radius: 12px; padding: 10px; margin-bottom: 8px; list-style: none; }
+.t-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .t-title { font-weight: 600; }
-.t-verify, .t-files, .t-deps { font-size: 13px; color: var(--muted); }
+.t-verify, .t-files, .t-deps { font-size: 13px; color: var(--muted); word-break: break-all; }
+.badge { font-size: 12px; font-weight: 700; padding: 3px 8px; border-radius: 999px;
+  background: var(--line); color: var(--fg); white-space: nowrap; }
+.b-pending { background: #2a333d; color: var(--muted); }
+.b-running { background: #16324a; color: #7cc7ff; }
+.b-done { background: #123a24; color: var(--ok); }
+.b-failed { background: #3a1416; color: var(--danger); }
+.b-esc { background: #3a2e12; color: #ffca4c; }
+.pending { margin-top: 10px; }
+.pending .list li a { color: #ffca4c; }

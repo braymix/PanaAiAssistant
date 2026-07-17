@@ -77,7 +77,41 @@ const Argo = (() => {
 
   async function approvePlan(planId) {
     await jpost('/plans/' + planId + '/approve', {});
-    location.href = '/';
+  }
+
+  // monitor live del piano: aggiorna i badge dei task e le approvazioni pendenti
+  function monitorPlan(planId) {
+    const STYLE = {
+      pending: 'b-pending', running: 'b-running', verifying: 'b-running',
+      done: 'b-done', failed: 'b-failed', escalated: 'b-esc',
+    };
+    async function tick() {
+      let s;
+      try { s = await (await fetch('/plans/' + planId + '/status')).json(); }
+      catch (e) { return; }        // rete giu' (§4.15): riprova
+      (s.tasks || []).forEach((t) => {
+        const li = document.querySelector('[data-task="' + t.id + '"]');
+        if (!li) return;
+        const badge = li.querySelector('[data-status]');
+        badge.textContent = t.status + (t.attempts ? ' ·' + t.attempts : '');
+        badge.className = 'badge ' + (STYLE[t.status] || '');
+      });
+      const box = document.getElementById('pending');
+      const list = document.getElementById('pending-list');
+      if (box && list) {
+        list.innerHTML = '';
+        (s.pending_approvals || []).forEach((a) => {
+          const li = document.createElement('li');
+          li.innerHTML = '<a href="/approvals/' + a.id + '">▶ ' + a.tool_name +
+            ' — ' + (a.task_title || '') + '</a>';
+          list.appendChild(li);
+        });
+        box.hidden = (s.pending_approvals || []).length === 0;
+      }
+      if (['done', 'failed'].includes(s.plan_status)) clearInterval(timer);
+    }
+    tick();
+    const timer = setInterval(tick, 2500);
   }
 
   async function newChat() {
@@ -166,6 +200,6 @@ const Argo = (() => {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 
   return { pollStats, subscribeGlobal, appendLog, wireChat, approvePlan,
-           newChat, decide, wireInstall, enablePush,
+           monitorPlan, newChat, decide, wireInstall, enablePush,
            loadProjects, addProject, newChatWithProject };
 })();

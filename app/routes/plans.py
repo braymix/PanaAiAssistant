@@ -32,6 +32,28 @@ async def via(body: ViaRequest):
     return {"plan_id": plan_id, "next": f"/plans/{plan_id}"}
 
 
+@router.get("/{plan_id}/status")
+async def plan_status(plan_id: str):
+    """Stato live per il monitor mobile: task + approvazioni pendenti."""
+    db = get_db()
+    plan = db.query_one("SELECT * FROM plan_document WHERE id=?", (plan_id,))
+    if not plan:
+        raise HTTPException(status_code=404, detail="piano inesistente")
+    tasks = db.query(
+        "SELECT id, title, status, attempts, backend FROM task WHERE plan_id=? "
+        "ORDER BY seq", (plan_id,))
+    # approvazioni pendenti per i run dei task di questo piano
+    pending = db.query(
+        "SELECT a.id, a.tool_name, t.title AS task_title FROM approval a "
+        "JOIN run r ON a.run_id=r.id JOIN task t ON r.task_id=t.id "
+        "WHERE t.plan_id=? AND a.status='pending' ORDER BY a.pushed_at", (plan_id,))
+    return {
+        "plan_status": plan["status"],
+        "tasks": [dict(t) for t in tasks],
+        "pending_approvals": [dict(p) for p in pending],
+    }
+
+
 @router.post("/{plan_id}/approve")
 async def approve(plan_id: str):
     """Conferma finale (post-VIA): lancia l'executor pool in background (M4)."""
