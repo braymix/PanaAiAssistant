@@ -1,0 +1,20 @@
+# Segreti VAPID e subscription del telefono — MAI committare (§4).
+gates/gate0_push/vapid_keys.json
+gates/gate0_push/subscription.json
+gates/gate0_push/static/icon-*.png
+
+# Artefatti dei gate
+hello_gate1.txt
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# SQLite (fasi successive)
+*.db
+*.db-wal
+*.db-shm
+artifacts/
