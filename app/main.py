@@ -13,7 +13,7 @@ from fastapi.templating import Jinja2Templates
 from .config import get_settings
 from .db import init_db
 from .security import IdentityMiddleware
-from .routes import chat, plans, runs, approvals as approvals_route, push as push_route, stats as stats_route, ui
+from .routes import chat, plans, runs, approvals as approvals_route, push as push_route, stats as stats_route, ui, projects as projects_route
 
 HERE = Path(__file__).parent
 STATIC = HERE / "static"
@@ -35,6 +35,7 @@ def create_app() -> FastAPI:
     app.add_middleware(IdentityMiddleware)
 
     app.include_router(ui.router)
+    app.include_router(projects_route.router)
     app.include_router(chat.router)
     app.include_router(plans.router)
     app.include_router(runs.router)

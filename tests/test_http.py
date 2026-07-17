@@ -41,6 +41,22 @@ def test_direct_hit_without_identity_rejected(db, settings):
     config.set_settings(settings)
 
 
+def test_project_create_validates_root(client, roots):
+    # dentro una root -> ok
+    good = roots[0] / "myrepo"
+    good.mkdir()
+    r = client.post("/projects", json={"name": "A", "repo_path": str(good)})
+    assert r.status_code == 200
+    assert client.get("/projects").json()[0]["name"] == "A"
+
+
+def test_project_outside_root_rejected(client, tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    r = client.post("/projects", json={"name": "B", "repo_path": str(outside)})
+    assert r.status_code == 422
+
+
 def test_via_rejects_plan_without_verify(client, monkeypatch):
     """Il PlanDocument e' rifiutato se un task e' privo di verify_cmd (§5.2).
 

@@ -97,6 +97,14 @@ h3 { font-size: 15px; margin: 16px 0 6px; color: var(--muted); }
 .btn.allow { background: var(--ok); color: #04140a; order: 1; }
 
 .toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
+.select, .inp {
+  width: 100%; min-height: 48px; margin: 6px 0; padding: 0 12px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  color: var(--fg); font-size: 16px;
+}
+.inp { padding: 12px; }
+.add-proj { margin: 8px 0 4px; color: var(--muted); }
+.add-proj summary { min-height: 44px; display: flex; align-items: center; }
 .files, .tasks { padding-left: 18px; }
 .tasks li { background: var(--panel); border: 1px solid var(--line);
   border-radius: 12px; padding: 10px; margin-bottom: 8px; list-style: none; }

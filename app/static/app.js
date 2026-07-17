@@ -85,6 +85,38 @@ const Argo = (() => {
     location.href = '/chat/' + r.conversation_id;
   }
 
+  // --- progetti ---
+  async function loadProjects() {
+    const sel = document.getElementById('project');
+    if (!sel) return;
+    try {
+      const projs = await (await fetch('/projects')).json();
+      projs.forEach((p) => {
+        const o = document.createElement('option');
+        o.value = p.repo_path; o.textContent = p.name + ' — ' + p.repo_path;
+        sel.appendChild(o);
+      });
+    } catch (e) { /* rete giu' */ }
+  }
+
+  async function addProject() {
+    const name = document.getElementById('p-name').value.trim();
+    const repo = document.getElementById('p-repo').value.trim();
+    if (!name || !repo) { alert('nome e repo_path richiesti'); return; }
+    try {
+      await jpost('/projects', { name, repo_path: repo });
+      location.reload();
+    } catch (e) { alert(e.message); }
+  }
+
+  async function newChatWithProject() {
+    const sel = document.getElementById('project');
+    const repo = sel ? sel.value : '';
+    const r = await jpost('/chat/new', { repo_path: repo });
+    const q = repo ? ('?repo=' + encodeURIComponent(repo)) : '';
+    location.href = '/chat/' + r.conversation_id + q;
+  }
+
   // --- approvazione (M2) ---
   async function decide(id, allow) {
     try {
@@ -134,5 +166,6 @@ const Argo = (() => {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 
   return { pollStats, subscribeGlobal, appendLog, wireChat, approvePlan,
-           newChat, decide, wireInstall, enablePush };
+           newChat, decide, wireInstall, enablePush,
+           loadProjects, addProject, newChatWithProject };
 })();

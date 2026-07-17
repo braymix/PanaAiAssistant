@@ -14,6 +14,15 @@
   <div class="stat"><span class="k" id="s-push">–</span><span class="l">push (qualità piano)</span></div>
 </section>
 
+<h2>Progetto</h2>
+<select id="project" class="select"><option value="">— scegli repo —</option></select>
+<details class="add-proj">
+  <summary>+ nuovo progetto</summary>
+  <input id="p-name" class="inp" placeholder="nome" />
+  <input id="p-repo" class="inp" placeholder="repo_path (dentro una root)" />
+  <button class="btn ghost" id="add-project">Aggiungi</button>
+</details>
+
 <h2>Conversazioni</h2>
 <ul class="list">
   {% for c in conversations %}
@@ -38,7 +47,9 @@
 <script>
   Argo.pollStats();
   Argo.subscribeGlobal((ev) => Argo.appendLog('live-log', ev));
-  document.getElementById('new-chat').onclick = Argo.newChat;
+  Argo.loadProjects();
+  document.getElementById('add-project').onclick = Argo.addProject;
+  document.getElementById('new-chat').onclick = Argo.newChatWithProject;
   document.getElementById('enable-push').onclick = Argo.enablePush;
   Argo.wireInstall('install');
 </script>

@@ -35,6 +35,14 @@ class ExecutorPool:
         self._task_ok: dict[str, bool] = {}
         self.pushes = {"pushes": 0}  # metrica qualita' piano (§3.2), esposta in stats
         self.queue_depth = 0
+        # classe client iniettabile (i test ne passano una finta; a runtime e' l'SDK)
+        self._client_cls = None
+
+    def _get_client_cls(self):
+        if self._client_cls is None:
+            from claude_agent_sdk import ClaudeSDKClient
+            self._client_cls = ClaudeSDKClient
+        return self._client_cls
 
     # --- ingresso: il tasto VIA ha gia' creato il piano; qui parte l'esecuzione --
     async def approve_and_run(self, plan_id: str) -> None:
@@ -147,7 +155,9 @@ class ExecutorPool:
             await self._run_once(task_id, brief, repo, files_allowed, roots, backend)
 
             db.execute("UPDATE task SET status='verifying' WHERE id=?", (task_id,))
-            passed, output = self._run_verify(brief, repo)
+            # verify_cmd puo' durare minuti: in un thread, altrimenti blocca il
+            # solo event loop del processo (§2: un solo processo asyncio).
+            passed, output = await asyncio.to_thread(self._run_verify, brief, repo)
             db.execute("UPDATE task SET verify_output=? WHERE id=?", (output, task_id))
             await get_bus().emit(None, "verify_result", {
                 "task_id": task_id, "passed": passed,
@@ -176,8 +186,6 @@ class ExecutorPool:
 
     async def _run_once(self, task_id: str, brief: TaskBrief, repo: Path,
                         files_allowed, roots, backend: str) -> None:
-        from claude_agent_sdk import ClaudeSDKClient
-
         db = get_db()
         bus = get_bus()
         run_id = new_id("run")
@@ -196,15 +204,13 @@ class ExecutorPool:
             self.settings, str(repo), can_use_tool, brief.max_turns, backend)
 
         prompt = _executor_prompt(brief)
-        cost = 0.0
-        turns = 0
-        session_id = None
+        captured = {"cost": 0.0, "turns": 0, "session_id": None}
         error = None
         try:
             # timeout wall-clock (§1.9): un executor locale incastrato non e' "lento".
             await asyncio.wait_for(
-                self._drive_client(ClaudeSDKClient, options, prompt, run_id, bus,
-                                   lambda **k: _capture(k)),
+                self._drive_client(self._get_client_cls(), options, prompt,
+                                   run_id, bus, captured),
                 timeout=brief.timeout_s or self.settings.local_task_timeout_s,
             )
         except asyncio.TimeoutError:
@@ -217,11 +223,11 @@ class ExecutorPool:
         db.execute(
             "UPDATE run SET status=?, cost_usd=?, turns=?, session_id=?, ended_at=?, "
             "error=? WHERE id=?",
-            ("error" if error else "done", cost, turns, session_id, utcnow(),
-             error, run_id),
+            ("error" if error else "done", captured["cost"], captured["turns"],
+             captured["session_id"], utcnow(), error, run_id),
         )
 
-    async def _drive_client(self, ClientCls, options, prompt, run_id, bus, sink):
+    async def _drive_client(self, ClientCls, options, prompt, run_id, bus, captured):
         db = get_db()
         async with ClientCls(options=options) as client:
             await client.query(prompt)
@@ -232,6 +238,7 @@ class ExecutorPool:
                     sid = data.get("session_id")
                     if sid:
                         # §1.7: persisti il session_id SUBITO (senza: niente resume)
+                        captured["session_id"] = sid
                         db.execute("UPDATE run SET session_id=? WHERE id=?",
                                    (sid, run_id))
                 if name == "AssistantMessage":
@@ -246,11 +253,13 @@ class ExecutorPool:
                                 "input": getattr(block, "input", {}),
                             })
                 if name == "ResultMessage":
+                    captured["turns"] = getattr(msg, "num_turns", 0) or 0
+                    captured["cost"] = getattr(msg, "total_cost_usd", 0.0) or 0.0
                     await bus.emit(run_id, "result", {
                         "subtype": getattr(msg, "subtype", None),
                         "is_error": getattr(msg, "is_error", None),
-                        "turns": getattr(msg, "num_turns", None),
-                        "cost_usd": getattr(msg, "total_cost_usd", None),
+                        "turns": captured["turns"],
+                        "cost_usd": captured["cost"],
                     })
 
     def _run_verify(self, brief: TaskBrief, repo: Path) -> tuple[bool, str]:
@@ -279,10 +288,6 @@ def _executor_prompt(brief: TaskBrief) -> str:
         + "\n".join(f"- {f}" for f in brief.files_allowed)
         + f"\n\n## Criterio di accettazione\n{brief.acceptance}\n"
     )
-
-
-def _capture(_k):  # placeholder sink, i valori reali finiscono su DB/eventi
-    return None
 
 
 _pool: ExecutorPool | None = None

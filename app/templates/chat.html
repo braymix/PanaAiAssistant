@@ -26,7 +26,7 @@
 {% block scripts %}
 <script>
   const CID = "{{ conversation['id'] if conversation else '' }}";
-  const REPO = "{{ conversation['repo_path'] if conversation and conversation['repo_path'] is defined else '' }}";
+  const REPO = "{{ repo }}";
   Argo.wireChat(CID, REPO);
 </script>
 {% endblock %}

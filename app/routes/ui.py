@@ -32,8 +32,10 @@ async def chat_page(request: Request, conversation_id: str):
     msgs = db.query(
         "SELECT * FROM message WHERE conversation_id=? ORDER BY id ASC",
         (conversation_id,))
+    # repo_path viaggia via query param (?repo=): conversation §5.1 non ha la colonna
+    repo = request.query_params.get("repo", "")
     return templates.TemplateResponse(request, "chat.html", {
-        "request": request, "conversation": conv, "messages": msgs,
+        "request": request, "conversation": conv, "messages": msgs, "repo": repo,
     })
 
 
