@@ -44,6 +44,25 @@ def make_planner_options(settings: Settings, cwd: str, can_use_tool: Callable,
     return ClaudeAgentOptions(**kwargs)
 
 
+def make_via_options(settings: Settings, cwd: str, can_use_tool: Callable,
+                     max_turns: int = 40):
+    """Generazione del PlanDocument (tasto VIA): NON plan mode (in plan mode la CLI
+    propone un piano, non produce JSON). Read-only: niente Write/Edit/Bash, cosi'
+    non tocca nulla ma puo' leggere il repo e rispondere in JSON."""
+    from claude_agent_sdk import ClaudeAgentOptions
+    kwargs = dict(
+        cwd=cwd,
+        permission_mode="default",
+        disallowed_tools=PLANNER_DISALLOWED,   # non tocca file
+        allowed_tools=list(READONLY_TOOLS),    # puo' leggere
+        can_use_tool=can_use_tool,
+        max_turns=max_turns,
+    )
+    if settings.subscription_model:
+        kwargs["model"] = settings.subscription_model
+    return ClaudeAgentOptions(**kwargs)
+
+
 def make_executor_options(settings: Settings, cwd: str, can_use_tool: Callable,
                           max_turns: int, backend: str):
     """Executor. backend='ollama' -> env verso Ollama; 'subscription' -> escalation."""
