@@ -60,6 +60,46 @@ def _extract_json(text: str) -> dict:
     return json.loads(text[start:end + 1])
 
 
+# classe client iniettabile (i test ne passano una finta; a runtime e' l'SDK)
+_CLIENT_CLS = None
+
+
+def _get_client_cls():
+    global _CLIENT_CLS
+    if _CLIENT_CLS is None:
+        from claude_agent_sdk import ClaudeSDKClient
+        _CLIENT_CLS = ClaudeSDKClient
+    return _CLIENT_CLS
+
+
+def set_client_cls(cls) -> None:
+    """Per i test: sostituisce il client SDK con un fake."""
+    global _CLIENT_CLS
+    _CLIENT_CLS = cls
+
+
+def _latest_planner_session(db, conversation_id: str) -> str | None:
+    """Ultima sessione del planner per questa conversazione (§1.7 -> resume)."""
+    row = db.query_one(
+        "SELECT session_id FROM run WHERE conversation_id=? AND backend='subscription' "
+        "AND session_id IS NOT NULL ORDER BY started_at DESC, id DESC LIMIT 1",
+        (conversation_id,),
+    )
+    return row["session_id"] if row else None
+
+
+def _record_planner_run(db, conversation_id: str, session_id: str | None,
+                        cost: float = 0.0) -> None:
+    from .ids import new_id
+    db.execute(
+        "INSERT INTO run(id, task_id, conversation_id, session_id, backend, model, "
+        "status, cost_usd, started_at, ended_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (new_id("run"), None, conversation_id, session_id, "subscription",
+         get_settings().subscription_model or "default", "done", cost,
+         utcnow(), utcnow()),
+    )
+
+
 async def _ask_phone_gate(tool_name, input_data, context):
     # Il planner in plan mode non dovrebbe toccare nulla; se ci prova, chiedi.
     from .approvals import get_broker
@@ -80,8 +120,6 @@ async def chat_stream(conversation_id: str, repo_cwd: str, user_text: str,
 
     Persiste il messaggio utente e la risposta. Ritorna (via return) il session_id.
     """
-    from claude_agent_sdk import ClaudeSDKClient
-
     db = get_db()
     bus = get_bus()
     db.execute(
@@ -90,6 +128,9 @@ async def chat_stream(conversation_id: str, repo_cwd: str, user_text: str,
     )
 
     settings = get_settings()
+    # continuita' della conversazione: se non passato, riprendi l'ultima sessione
+    if resume_session is None:
+        resume_session = _latest_planner_session(db, conversation_id)
     options = make_planner_options(settings, repo_cwd, _ask_phone_gate)
     if resume_session:
         options.resume = resume_session
@@ -97,7 +138,7 @@ async def chat_stream(conversation_id: str, repo_cwd: str, user_text: str,
     assistant_text: list[str] = []
     session_id = resume_session
 
-    async with ClaudeSDKClient(options=options) as client:
+    async with _get_client_cls()(options=options) as client:
         await client.query(user_text)
         async for msg in client.receive_response():
             name = type(msg).__name__
@@ -118,6 +159,9 @@ async def chat_stream(conversation_id: str, repo_cwd: str, user_text: str,
         "INSERT INTO message(conversation_id, role, content, ts) VALUES(?,?,?,?)",
         (conversation_id, "assistant", full, utcnow()),
     )
+    # persisti la sessione (§1.7): senza, il turno dopo ripartirebbe da zero
+    if session_id:
+        _record_planner_run(db, conversation_id, session_id)
     await bus.emit(None, "chat_done", {
         "conversation_id": conversation_id, "session_id": session_id,
     })
@@ -130,10 +174,11 @@ async def generate_plan(conversation_id: str, repo_path: str,
 
     Solleva PlanValidationError se un task e' privo di verify_cmd (§5.2).
     """
-    from claude_agent_sdk import ClaudeSDKClient
-
     settings = get_settings()
     db = get_db()
+    # il piano deve riflettere la discussione: riprendi la sessione del planner
+    if resume_session is None:
+        resume_session = _latest_planner_session(db, conversation_id)
     options = make_planner_options(settings, repo_path, _ask_phone_gate)
     if resume_session:
         options.resume = resume_session
@@ -142,7 +187,7 @@ async def generate_plan(conversation_id: str, repo_path: str,
 
     raw_text: list[str] = []
     cost = 0.0
-    async with ClaudeSDKClient(options=options) as client:
+    async with _get_client_cls()(options=options) as client:
         await client.query(
             "Genera ORA il PlanDocument JSON per quanto discusso. Solo JSON."
         )
