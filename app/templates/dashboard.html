@@ -23,6 +23,16 @@
   <button class="btn ghost" id="add-project">Aggiungi</button>
 </details>
 
+{% if plans %}
+<h2>Piani recenti</h2>
+<ul class="list">
+  {% for p in plans %}
+  <li><a href="/plans/{{ p['id'] }}">{{ p['n_tasks'] }} task
+    <span class="badge b-{{ p['status'] }}">{{ p['status'] }}</span></a></li>
+  {% endfor %}
+</ul>
+{% endif %}
+
 <h2>Conversazioni</h2>
 <ul class="list">
   {% for c in conversations %}

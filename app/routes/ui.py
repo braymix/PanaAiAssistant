@@ -19,8 +19,12 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templa
 async def dashboard(request: Request):
     db = get_db()
     convs = db.query("SELECT * FROM conversation ORDER BY created_at DESC LIMIT 20")
+    plans = db.query(
+        "SELECT p.id, p.status, p.created_at, "
+        "(SELECT COUNT(*) FROM task t WHERE t.plan_id=p.id) AS n_tasks "
+        "FROM plan_document p ORDER BY p.created_at DESC LIMIT 10")
     return templates.TemplateResponse(request, "dashboard.html", {
-        "request": request, "conversations": convs,
+        "request": request, "conversations": convs, "plans": plans,
         "user": getattr(request.state, "user", "?"),
     })
 

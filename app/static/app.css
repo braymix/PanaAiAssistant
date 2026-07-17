@@ -118,6 +118,8 @@ h3 { font-size: 15px; margin: 16px 0 6px; color: var(--muted); }
 .b-done { background: #123a24; color: var(--ok); }
 .b-failed { background: #3a1416; color: var(--danger); }
 .b-esc { background: #3a2e12; color: #ffca4c; }
+.b-executing { background: #16324a; color: #7cc7ff; }
+.b-draft, .b-approved { background: #2a333d; color: var(--muted); }
 .pending { margin-top: 10px; }
 .pending .list li a { color: #ffca4c; }
 
