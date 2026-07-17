@@ -14,8 +14,12 @@ from __future__ import annotations
 
 import json
 
-from .backends import make_planner_options
-from .briefs import PlanDocument, validate_plan
+import logging
+
+from .backends import make_planner_options, make_via_options
+from .briefs import PlanDocument, PlanValidationError, validate_plan
+
+log = logging.getLogger("argo.planner")
 from .config import get_settings
 from .db import get_db, utcnow
 from .events import get_bus
@@ -179,7 +183,8 @@ async def generate_plan(conversation_id: str, repo_path: str,
     # il piano deve riflettere la discussione: riprendi la sessione del planner
     if resume_session is None:
         resume_session = _latest_planner_session(db, conversation_id)
-    options = make_planner_options(settings, repo_path, _ask_phone_gate)
+    # NON plan mode (vedi make_via_options): serve JSON, non un piano proposto.
+    options = make_via_options(settings, repo_path, _ask_phone_gate)
     if resume_session:
         options.resume = resume_session
     # inietta il contratto d'output del VIA
@@ -189,7 +194,8 @@ async def generate_plan(conversation_id: str, repo_path: str,
     cost = 0.0
     async with _get_client_cls()(options=options) as client:
         await client.query(
-            "Genera ORA il PlanDocument JSON per quanto discusso. Solo JSON."
+            "Genera ORA il PlanDocument JSON per la feature discussa. "
+            "Rispondi con UN SOLO oggetto JSON, niente altro testo."
         )
         async for msg in client.receive_response():
             if type(msg).__name__ == "AssistantMessage":
@@ -198,8 +204,24 @@ async def generate_plan(conversation_id: str, repo_path: str,
                         raw_text.append(getattr(block, "text", ""))
             if type(msg).__name__ == "ResultMessage":
                 cost = getattr(msg, "total_cost_usd", 0) or 0.0
+                # fallback: alcune risposte arrivano solo nel campo result
+                res = getattr(msg, "result", None)
+                if res and not raw_text:
+                    raw_text.append(str(res))
 
-    data = _extract_json("".join(raw_text))
+    joined = "".join(raw_text).strip()
+    if not joined:
+        raise PlanValidationError(
+            "Il planner non ha prodotto testo. Controlla: hai prima descritto la "
+            "feature in chat? La CLI `claude` e' installata e loggata? "
+            "(vedi RUNBOOK Fase C)")
+    try:
+        data = _extract_json(joined)
+    except (ValueError, json.JSONDecodeError) as e:
+        log.warning("VIA: JSON non estraibile. Testo del planner:\n%s", joined[:2000])
+        raise PlanValidationError(
+            f"Il planner non ha risposto in JSON ({e}). Anteprima: "
+            f"{joined[:300]!r}. Riprova chiedendo in chat un piano piu' concreto.")
     if not data.get("repo_path"):
         data["repo_path"] = repo_path
     plan = PlanDocument.from_dict(data)
