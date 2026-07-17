@@ -65,6 +65,10 @@ class ExecutorPool:
             await bus.emit(None, "error", {"plan_id": plan_id, "detail": str(e)})
             raise
 
+        # crea la cartella del repo se non esiste (e' dentro le root): evita
+        # WinError 267 quando la CLI parte con un cwd inesistente.
+        repo_resolved.mkdir(parents=True, exist_ok=True)
+
         # il tasto VIA E' l'approvazione umana (§3.2): timbrala.
         db.execute(
             "UPDATE plan_document SET status='executing', approved_at=? WHERE id=?",

@@ -13,17 +13,18 @@ l'ultima parola: rifiuta se un solo task e' privo di verify_cmd.
 from __future__ import annotations
 
 import json
-
 import logging
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from .backends import make_planner_options, make_via_options
 from .briefs import PlanDocument, PlanValidationError, validate_plan
-
-log = logging.getLogger("argo.planner")
 from .config import get_settings
 from .db import get_db, utcnow
 from .events import get_bus
 from .ids import new_id
+from .security import resolve_within_roots, PathNotAllowed
+
+log = logging.getLogger("argo.planner")
 
 PLAN_CHAT_SYSTEM = (
     "Sei il planner di Argo. Sei in plan mode: NON tocchi file, discuti e "
@@ -82,6 +83,28 @@ def set_client_cls(cls) -> None:
     _CLIENT_CLS = cls
 
 
+def _is_absolute_any(f: str) -> bool:
+    """Assoluto secondo la semantica Windows O Posix (robusto cross-platform)."""
+    return PureWindowsPath(f).is_absolute() or PurePosixPath(f).is_absolute()
+
+
+def _basename_if_absolute(f: str) -> str:
+    # PureWindowsPath.name gestisce sia '\' sia '/', quindi ricava il nome file
+    # anche per un path Posix; per i relativi lascia tutto invariato.
+    return PureWindowsPath(f).name if _is_absolute_any(f) else f
+
+
+def _safe_cwd(repo_cwd: str, settings) -> str:
+    """Ritorna una working dir valida e dentro le root; altrimenti '.' (app dir)."""
+    roots = settings.resolved_roots()
+    try:
+        resolved = resolve_within_roots(repo_cwd or ".", roots)
+        resolved.mkdir(parents=True, exist_ok=True)
+        return str(resolved)
+    except (PathNotAllowed, OSError):
+        return "."
+
+
 def _latest_planner_session(db, conversation_id: str) -> str | None:
     """Ultima sessione del planner per questa conversazione (§1.7 -> resume)."""
     row = db.query_one(
@@ -130,6 +153,9 @@ async def chat_stream(conversation_id: str, repo_cwd: str, user_text: str,
     )
 
     settings = get_settings()
+    # cwd valido: se la cartella non esiste o e' fuori dalle root, ripiega su "."
+    # (evita WinError 267 "Nome di directory non valido" all'avvio della CLI).
+    repo_cwd = _safe_cwd(repo_cwd, settings)
     # continuita' della conversazione: se non passato, riprendi l'ultima sessione
     if resume_session is None:
         resume_session = _latest_planner_session(db, conversation_id)
@@ -192,8 +218,12 @@ async def generate_plan(conversation_id: str, repo_path: str,
     cost = 0.0
     async with _get_client_cls()(options=options) as client:
         await client.query(
-            "Genera ORA il PlanDocument JSON per la feature discussa. "
-            "Rispondi con UN SOLO oggetto JSON, niente altro testo."
+            f"Genera ORA il PlanDocument JSON per la feature discussa.\n"
+            f"repo_path DEVE essere ESATTAMENTE: {repo_path}\n"
+            f"In files_allowed usa SOLO percorsi RELATIVI a repo_path (es. "
+            f"'CASO_GARLASCO.md' o 'sezioni/intro.md'), MAI percorsi assoluti e "
+            f"MAI cartelle diverse da repo_path.\n"
+            f"Rispondi con UN SOLO oggetto JSON, niente altro testo."
         )
         async for msg in client.receive_response():
             if type(msg).__name__ == "AssistantMessage":
@@ -220,9 +250,17 @@ async def generate_plan(conversation_id: str, repo_path: str,
         raise PlanValidationError(
             f"Il planner non ha risposto in JSON ({e}). Anteprima: "
             f"{joined[:300]!r}. Riprova chiedendo in chat un piano piu' concreto.")
-    if not data.get("repo_path"):
-        data["repo_path"] = repo_path
+    # FORZA il repo_path al progetto scelto: il planner tende a inventarne uno
+    # (es. C:\Users\...\Documents\Garlasco) che cade fuori dalle root e fa fallire
+    # tutto. E' l'utente col progetto a decidere DOVE si scrive, non il planner.
+    data["repo_path"] = repo_path
     plan = PlanDocument.from_dict(data)
+    # ri-radica dentro il repo: percorsi assoluti -> solo nome file; verify_cwd
+    # assoluto -> ".". Cosi' i files_allowed cadono sempre dentro il progetto.
+    for t in plan.tasks:
+        t.files_allowed = [_basename_if_absolute(f) for f in t.files_allowed]
+        if t.verify_cwd and _is_absolute_any(t.verify_cwd):
+            t.verify_cwd = "."
     validate_plan(plan)   # rifiuta se manca un verify_cmd (§5.2)
 
     plan_id = new_id("plan")
