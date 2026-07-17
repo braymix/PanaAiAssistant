@@ -15,6 +15,9 @@ $env:ARGO_ROOTS = (Split-Path $PSScriptRoot -Parent)
 # (SOLO in locale; con l'app esposta su Tailscale togli questa riga)
 $env:ARGO_DEV_ALLOW_NO_IDENTITY = "1"
 
+# --- modello Ollama per gli executor: usa il TAG ESATTO che hai (ollama list) ---
+$env:ARGO_OLLAMA_MODEL = "qwen3-coder:30b"
+
 # --- chiavi push, se le hai generate (opzionale) ---
 $vapid = Join-Path $PSScriptRoot "gates\gate0_push\vapid_keys.json"
 if (Test-Path $vapid) { $env:ARGO_VAPID_KEYS = $vapid }
