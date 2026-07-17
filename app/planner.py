@@ -204,6 +204,9 @@ async def generate_plan(conversation_id: str, repo_path: str,
     """
     settings = get_settings()
     db = get_db()
+    # cwd valido e dentro le root, creato se manca: senza, la CLI fallisce con
+    # WinError 267. repo_path diventa cosi' anche il repo_path (assoluto) del piano.
+    repo_path = _safe_cwd(repo_path, settings)
     # il piano deve riflettere la discussione: riprendi la sessione del planner
     if resume_session is None:
         resume_session = _latest_planner_session(db, conversation_id)
