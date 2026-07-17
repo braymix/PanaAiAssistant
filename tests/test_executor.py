@@ -140,6 +140,26 @@ def test_retry_then_escalation_to_subscription(db, settings, roots):
     assert esc is not None
 
 
+def test_run_verify_blocks_dangerous_and_cwd_escape(db, settings, roots):
+    from app.briefs import TaskBrief
+    repo = roots[0] / "proj4"
+    repo.mkdir()
+    pool = get_pool()
+
+    # verify_cmd distruttivo -> rifiutato in esecuzione (difesa in profondita')
+    bad_cmd = TaskBrief(id="t", title="t", files_allowed=["a.py"], context="",
+                        instructions="x", acceptance="", verify_cmd="rm -rf /")
+    passed, out = pool._run_verify(bad_cmd, repo, roots)
+    assert not passed and "distruttivo" in out
+
+    # verify_cwd che esce dalle root -> rifiutato
+    escape = TaskBrief(id="t", title="t", files_allowed=["a.py"], context="",
+                       instructions="x", acceptance="", verify_cmd="true",
+                       verify_cwd="../../..")
+    passed, out = pool._run_verify(escape, repo, roots)
+    assert not passed and "fuori dalle root" in out
+
+
 def test_all_retries_fail_marks_failed(db, settings, roots):
     settings.max_local_retries = 1
     repo = roots[0] / "proj3"

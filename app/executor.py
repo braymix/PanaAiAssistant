@@ -157,7 +157,8 @@ class ExecutorPool:
             db.execute("UPDATE task SET status='verifying' WHERE id=?", (task_id,))
             # verify_cmd puo' durare minuti: in un thread, altrimenti blocca il
             # solo event loop del processo (§2: un solo processo asyncio).
-            passed, output = await asyncio.to_thread(self._run_verify, brief, repo)
+            passed, output = await asyncio.to_thread(
+                self._run_verify, brief, repo, roots)
             db.execute("UPDATE task SET verify_output=? WHERE id=?", (output, task_id))
             await get_bus().emit(None, "verify_result", {
                 "task_id": task_id, "passed": passed,
@@ -262,9 +263,16 @@ class ExecutorPool:
                         "cost_usd": captured["cost"],
                     })
 
-    def _run_verify(self, brief: TaskBrief, repo: Path) -> tuple[bool, str]:
-        """Esegue verify_cmd. L'exit code e' il fatto (§5.2)."""
-        cwd = (repo / brief.verify_cwd).resolve()
+    def _run_verify(self, brief: TaskBrief, repo: Path, roots) -> tuple[bool, str]:
+        """Esegue verify_cmd. L'exit code e' il fatto (§5.2). Difesa in profondita':
+        ricontrolla il comando e confina verify_cwd dentro le root (4.3)."""
+        from .policy import is_dangerous_bash
+        if is_dangerous_bash(brief.verify_cmd):
+            return False, f"verify_cmd distruttivo rifiutato: {brief.verify_cmd!r}"
+        try:
+            cwd = resolve_within_roots((repo / brief.verify_cwd), roots)
+        except PathNotAllowed as e:
+            return False, f"verify_cwd fuori dalle root: {e}"
         try:
             proc = subprocess.run(
                 brief.verify_cmd, shell=True, cwd=str(cwd),

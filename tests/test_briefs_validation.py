@@ -55,3 +55,11 @@ def test_empty_plan_rejected():
     plan = PlanDocument.from_dict({"repo_path": "/r", "tasks": []})
     with pytest.raises(PlanValidationError):
         validate_plan(plan)
+
+
+def test_dangerous_verify_cmd_rejected():
+    # un verify_cmd distruttivo (gira con shell=True) fa rifiutare il piano
+    plan = PlanDocument.from_dict({"repo_path": "/r",
+        "tasks": [_task("t1", verify="rm -rf / && pytest")]})
+    with pytest.raises(PlanValidationError, match="distruttivo"):
+        validate_plan(plan)

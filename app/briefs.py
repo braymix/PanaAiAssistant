@@ -102,10 +102,19 @@ def validate_plan(plan: PlanDocument) -> None:
     if dupes:
         raise PlanValidationError(f"Id task duplicati: {sorted(dupes)}")
 
+    from .policy import is_dangerous_bash  # locale: evita qualsiasi load-order
+
     for t in plan.tasks:
         if not t.verify_cmd:
             raise PlanValidationError(
                 f"Task '{t.id}' ({t.title}) senza verify_cmd: rifiutato (§5.2)."
+            )
+        # il verify_cmd gira con shell=True nell'orchestratore: un comando
+        # distruttivo (magari allucinato dal planner) bypasserebbe la denylist
+        # del Bash-tool. Rifiuta il piano qui (stesso strato di §8).
+        if is_dangerous_bash(t.verify_cmd):
+            raise PlanValidationError(
+                f"Task '{t.id}': verify_cmd distruttivo bloccato: {t.verify_cmd!r}"
             )
         if not t.files_allowed:
             raise PlanValidationError(
