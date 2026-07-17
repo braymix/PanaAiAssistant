@@ -46,6 +46,12 @@ class Settings:
     ollama_url: str = os.environ.get("OLLAMA_URL", "http://localhost:11434")
     ollama_model: str = os.environ.get("ARGO_OLLAMA_MODEL", "qwen3-coder")
     ollama_context_length: str = os.environ.get("OLLAMA_CONTEXT_LENGTH", "65536")
+    # log del server Ollama (default: posizione tipica su Windows). Override con
+    # ARGO_OLLAMA_LOG se il tuo e' altrove.
+    ollama_log: str = os.environ.get(
+        "ARGO_OLLAMA_LOG",
+        os.path.expandvars(r"%LOCALAPPDATA%\Ollama\server.log"),
+    )
 
     # backend abbonamento (planner + escalation)
     subscription_model: str = os.environ.get("ARGO_SUB_MODEL", "")  # "" = default SDK

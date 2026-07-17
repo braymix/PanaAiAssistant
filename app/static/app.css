@@ -42,6 +42,12 @@ h3 { font-size: 15px; margin: 16px 0 6px; color: var(--muted); }
 .list { list-style: none; padding: 0; margin: 8px 0; }
 .list li { padding: 14px 12px; background: var(--panel);
   border: 1px solid var(--line); border-radius: 12px; margin-bottom: 8px; }
+.list li.row { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; }
+.row-main { flex: 1; min-height: 44px; display: flex; align-items: center; }
+.del { min-width: 44px; min-height: 44px; border: 0; border-radius: 10px;
+  background: transparent; color: var(--danger); font-size: 18px;
+  -webkit-tap-highlight-color: transparent; }
+.ollog { max-height: 55vh; overflow-y: auto; font: 12px/1.4 ui-monospace, monospace; }
 
 .log, .messages { display: flex; flex-direction: column; gap: 8px; }
 .log { margin-top: 12px; font: 13px/1.4 ui-monospace, monospace;

@@ -185,6 +185,53 @@ const Argo = (() => {
     es.addEventListener('error', (e) => add('fail', 'errore: ' + (parse(e).detail || '')));
   }
 
+  // --- Ollama: log live + modelli caricati ---
+  function streamOllamaLogs() {
+    const box = document.getElementById('ollog');
+    if (!box) return;
+    const es = new EventSource('/ollama/logs/stream');
+    es.addEventListener('logline', (e) => {
+      const d = document.createElement('div');
+      d.className = 'ev'; d.textContent = e.data;
+      box.appendChild(d);
+      while (box.childNodes.length > 500) box.removeChild(box.firstChild);
+      box.scrollTop = box.scrollHeight;
+    });
+  }
+
+  async function pollOllamaPs() {
+    const el = document.getElementById('ps');
+    if (!el) return;
+    async function tick() {
+      try {
+        const s = await (await fetch('/ollama/ps')).json();
+        if (s.error) { el.textContent = s.error; return; }
+        const models = s.models || [];
+        if (!models.length) { el.textContent = 'nessun modello caricato ora.'; return; }
+        el.innerHTML = '';
+        models.forEach((m) => {
+          const gpu = (m.size_vram && m.size)
+            ? Math.round(100 * m.size_vram / m.size) : null;
+          const d = document.createElement('div'); d.className = 'ev';
+          d.textContent = m.name + (gpu !== null ? '  ·  ' + gpu + '% GPU' : '');
+          el.appendChild(d);
+        });
+      } catch (e) { el.textContent = 'Ollama non raggiungibile.'; }
+    }
+    tick(); setInterval(tick, 3000);
+  }
+
+  async function deleteChat(id, ev) {
+    if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+    if (!confirm('Eliminare questa chat?')) return;
+    try {
+      const r = await fetch('/chat/' + id, { method: 'DELETE' });
+      if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+      const li = document.querySelector('[data-conv="' + id + '"]');
+      if (li) li.remove();
+    } catch (e) { alert(e.message); }
+  }
+
   // --- approvazione (M2) ---
   async function decide(id, allow) {
     try {
@@ -235,5 +282,6 @@ const Argo = (() => {
 
   return { pollStats, subscribeGlobal, appendLog, wireChat, approvePlan,
            monitorPlan, streamRun, newChat, decide, wireInstall, enablePush,
-           loadProjects, addProject, newChatWithProject };
+           loadProjects, addProject, newChatWithProject,
+           streamOllamaLogs, pollOllamaPs, deleteChat };
 })();

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Argo · Ollama{% endblock %}
+{% block content %}
+<h2>Ollama</h2>
+
+<h3>Modelli caricati</h3>
+<div id="ps" class="log" aria-live="polite">carico…</div>
+
+<h3>Log del server (live)</h3>
+<div id="ollog" class="log ollog" aria-live="polite"></div>
+{% endblock %}
+{% block footer %}
+<div class="actionbar">
+  <a class="btn ghost wide" href="/">Home</a>
+  <button class="btn wide" id="clear">Pulisci</button>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  Argo.streamOllamaLogs();
+  Argo.pollOllamaPs();
+  document.getElementById('clear').onclick = () => {
+    document.getElementById('ollog').innerHTML = '';
+  };
+</script>
+{% endblock %}
