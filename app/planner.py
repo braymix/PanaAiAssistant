@@ -105,17 +105,15 @@ def _record_planner_run(db, conversation_id: str, session_id: str | None,
 
 
 async def _ask_phone_gate(tool_name, input_data, context):
-    # Il planner in plan mode non dovrebbe toccare nulla; se ci prova, chiedi.
-    from .approvals import get_broker
-    # run_id None: usa un canale globale per l'eccezione del planner
-    decision = await get_broker().request(
-        run_id="planner", tool_name=tool_name, tool_input=input_data,
-        title="Il planner ha tentato un'azione in plan mode",
-    )
-    from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny
-    if decision.status == "allowed":
-        return PermissionResultAllow(updated_input=decision.updated_input)
-    return PermissionResultDeny(message=decision.reason or "negato")
+    # Il planner e' in plan mode e ha Write/Edit/Bash/AskUserQuestion gia'
+    # DISALLOWED (backends.PLANNER_DISALLOWED): tutto cio' che arriva qui e' un
+    # tool di sola pianificazione (WebSearch, Task/sub-agenti, Read/Glob/Grep) che
+    # NON muta il repo. Auto-allow: niente push, niente timeout. Le domande di
+    # chiarimento il planner le fa come testo in chat, e l'utente risponde scrivendo.
+    from claude_agent_sdk import PermissionResultAllow
+    await get_bus().emit(None, "policy_auto_allow",
+                         {"tool_name": tool_name, "reason": "planner (plan mode)"})
+    return PermissionResultAllow()
 
 
 async def chat_stream(conversation_id: str, repo_cwd: str, user_text: str,

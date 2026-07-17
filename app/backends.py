@@ -17,7 +17,10 @@ from .config import Settings
 # tool di sola lettura: sicuri da auto-approvare. Il resto passa dal gate.
 READONLY_TOOLS = ["Read", "Glob", "Grep"]
 
-PLANNER_DISALLOWED = ["Write", "Edit", "Bash", "NotebookEdit"]
+# Il planner non tocca file. In piu' disabilitiamo AskUserQuestion: nella chat non
+# c'e' modo di rispondere a quel tool, quindi va in timeout; senza il tool, il
+# planner fa le domande come TESTO e l'utente risponde scrivendo in chat.
+PLANNER_DISALLOWED = ["Write", "Edit", "Bash", "NotebookEdit", "AskUserQuestion"]
 
 
 def ollama_env(settings: Settings) -> dict[str, str]:
