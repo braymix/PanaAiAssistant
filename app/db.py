@@ -127,6 +127,13 @@ class Database:
             (run_id, after_id),
         )
 
+    def events_all_after(self, after_id: int, limit: int = 500) -> list[sqlite3.Row]:
+        # replay globale (dashboard) — regola 4.15 anche sul canale "*"
+        return self.query(
+            "SELECT * FROM event WHERE id>? ORDER BY id ASC LIMIT ?",
+            (after_id, limit),
+        )
+
     def close(self) -> None:
         self._conn.close()
 

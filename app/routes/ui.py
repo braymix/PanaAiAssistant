@@ -52,6 +52,18 @@ async def plan_page(request: Request, plan_id: str):
     })
 
 
+@router.get("/runs/{run_id}", response_class=HTMLResponse)
+async def run_page(request: Request, run_id: str):
+    db = get_db()
+    run = db.query_one("SELECT * FROM run WHERE id=?", (run_id,))
+    task = None
+    if run and run["task_id"]:
+        task = db.query_one("SELECT * FROM task WHERE id=?", (run["task_id"],))
+    return templates.TemplateResponse(request, "run.html", {
+        "request": request, "run": run, "task": task,
+    })
+
+
 @router.get("/approvals/{approval_id}", response_class=HTMLResponse)
 async def approval_page(request: Request, approval_id: str):
     db = get_db()

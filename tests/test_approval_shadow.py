@@ -53,6 +53,24 @@ def test_write_outside_perimeter_produces_pending_approval(db, settings, roots):
     asyncio.run(scenario())
 
 
+def test_dangerous_bash_denied_at_runtime_without_asking(db, settings, roots):
+    """Il gate runtime nega rm -rf senza creare approvazioni (§8, secondo strato)."""
+    ctx = GateContext(run_id="run-danger", files_allowed_resolved=set(), roots=roots)
+    gate = make_policy_gate(ctx)
+
+    async def scenario():
+        result = await asyncio.wait_for(
+            gate("Bash", {"command": "rm -rf /"}, None), timeout=2)
+        assert type(result).__name__ == "PermissionResultDeny"
+        # nessuna approvazione creata (non e' andato al telefono)
+        assert db.query("SELECT * FROM approval") == []
+        assert ctx.push_counter.get("pushes", 0) == 0
+        # evento policy_deny nel log append-only
+        assert db.query_one("SELECT * FROM event WHERE kind='policy_deny'") is not None
+
+    asyncio.run(scenario())
+
+
 def test_approval_timeout_denies(db, settings, roots):
     """Regola 4.6: il timeout NEGA, non permette."""
     inside_root = roots[0] / "y.py"

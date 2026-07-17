@@ -120,3 +120,10 @@ h3 { font-size: 15px; margin: 16px 0 6px; color: var(--muted); }
 .b-esc { background: #3a2e12; color: #ffca4c; }
 .pending { margin-top: 10px; }
 .pending .list li a { color: #ffca4c; }
+
+.run-meta { display: flex; align-items: center; gap: 8px; margin: 6px 0 12px; }
+.ev { padding: 6px 8px; border-radius: 8px; background: var(--panel);
+  border: 1px solid var(--line); white-space: pre-wrap; word-break: break-word; }
+.ev.ok { border-color: #1b5e3a; } .ev.fail, .ev.deny { border-color: #5e1b1f; }
+.ev.tool { color: #7cc7ff; } .ev.appr { color: #ffca4c; }
+.ev.auto { color: var(--muted); }

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Argo · run{% endblock %}
+{% block content %}
+{% if not run %}
+<p class="muted">Run inesistente.</p>
+{% else %}
+<h2>{{ task['title'] if task else 'Run' }}</h2>
+<div class="run-meta">
+  <span class="badge">{{ run['backend'] }}</span>
+  <span class="badge">{{ run['status'] }}</span>
+  <span class="muted">{{ run['model'] }}</span>
+</div>
+{% if run['error'] %}<pre class="rawbox">{{ run['error'] }}</pre>{% endif %}
+
+<h3>Log live</h3>
+<div id="runlog" class="log" data-run="{{ run['id'] }}" aria-live="polite"></div>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+{% if run %}
+<script>
+  // EventSource riprende da solo con Last-Event-ID alla riconnessione (§4.15)
+  Argo.streamRun("{{ run['id'] }}");
+</script>
+{% endif %}
+{% endblock %}

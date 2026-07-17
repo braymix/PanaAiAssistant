@@ -100,3 +100,30 @@ async def run_event_stream(run_id: str, last_event_id: int):
             last_event_id = msg["id"]
     finally:
         await bus.unsubscribe(run_id, sub)
+
+
+async def global_event_stream(last_event_id: int):
+    """Generatore SSE globale (dashboard): replay da DB, poi live. Regola 4.15."""
+    bus = get_bus()
+    sub = await bus.subscribe("*")
+    try:
+        for row in get_db().events_all_after(last_event_id):
+            payload = row["payload"]
+            try:
+                payload = json.loads(payload)
+            except (TypeError, ValueError):
+                pass
+            yield sse_format(row["id"], row["kind"], payload)
+            last_event_id = row["id"]
+        while True:
+            try:
+                msg = await asyncio.wait_for(sub.queue.get(), timeout=15)
+            except asyncio.TimeoutError:
+                yield ": keep-alive\n\n"
+                continue
+            if msg["id"] <= last_event_id:
+                continue
+            yield sse_format(msg["id"], msg["kind"], msg["payload"])
+            last_event_id = msg["id"]
+    finally:
+        await bus.unsubscribe("*", sub)

@@ -95,6 +95,11 @@ const Argo = (() => {
         const badge = li.querySelector('[data-status]');
         badge.textContent = t.status + (t.attempts ? ' ·' + t.attempts : '');
         badge.className = 'badge ' + (STYLE[t.status] || '');
+        // collega il titolo alla pagina del run (log live) quando esiste
+        const titleEl = li.querySelector('.t-title');
+        if (t.run_id && titleEl && !titleEl.querySelector('a')) {
+          titleEl.innerHTML = '<a href="/runs/' + t.run_id + '">' + titleEl.textContent + '</a>';
+        }
       });
       const box = document.getElementById('pending');
       const list = document.getElementById('pending-list');
@@ -151,6 +156,35 @@ const Argo = (() => {
     location.href = '/chat/' + r.conversation_id + q;
   }
 
+  // --- dettaglio run: log live via SSE per-run (/runs/{id}/events) ---
+  function streamRun(runId) {
+    const log = document.getElementById('runlog');
+    if (!log) return;
+    const add = (cls, text) => {
+      const d = document.createElement('div');
+      d.className = 'ev ' + cls; d.textContent = text;
+      log.appendChild(d); log.scrollTop = log.scrollHeight;
+    };
+    const es = new EventSource('/runs/' + runId + '/events');
+    const parse = (e) => { try { return JSON.parse(e.data); } catch (x) { return {}; } };
+    es.addEventListener('assistant_text', (e) => add('txt', parse(e).text || ''));
+    es.addEventListener('tool_use', (e) => {
+      const d = parse(e); add('tool', '⚙ ' + d.name + ' ' + JSON.stringify(d.input || {}));
+    });
+    es.addEventListener('policy_auto_allow', (e) => add('auto', '✓ auto: ' + (parse(e).tool_name || '')));
+    es.addEventListener('policy_deny', (e) => add('deny', '✗ deny: ' + (parse(e).reason || '')));
+    es.addEventListener('approval_requested', (e) => add('appr', '⏸ approvazione: ' + (parse(e).tool_name || '')));
+    es.addEventListener('approval_resolved', (e) => add('appr', '▶ ' + (parse(e).status || '')));
+    es.addEventListener('verify_result', (e) => {
+      const d = parse(e); add(d.passed ? 'ok' : 'fail',
+        (d.passed ? '✅ verify ok' : '❌ verify fallito') + '\n' + (d.output_tail || ''));
+    });
+    es.addEventListener('result', (e) => {
+      const d = parse(e); add('res', 'result ' + d.subtype + ' · turni ' + d.turns + ' · $' + d.cost_usd);
+    });
+    es.addEventListener('error', (e) => add('fail', 'errore: ' + (parse(e).detail || '')));
+  }
+
   // --- approvazione (M2) ---
   async function decide(id, allow) {
     try {
@@ -200,6 +234,6 @@ const Argo = (() => {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 
   return { pollStats, subscribeGlobal, appendLog, wireChat, approvePlan,
-           monitorPlan, newChat, decide, wireInstall, enablePush,
+           monitorPlan, streamRun, newChat, decide, wireInstall, enablePush,
            loadProjects, addProject, newChatWithProject };
 })();

@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 
-from ..events import get_bus, run_event_stream, sse_format
+from ..events import global_event_stream, run_event_stream
 
 router = APIRouter()
 
@@ -33,23 +33,7 @@ async def run_events(request: Request, run_id: str):
 
 @router.get("/events")
 async def global_events(request: Request):
-    """Canale globale per dashboard/chat/stats."""
-    async def gen():
-        bus = get_bus()
-        sub = await bus.subscribe("*")
-        try:
-            while True:
-                if await request.is_disconnected():
-                    break
-                import asyncio
-                try:
-                    msg = await asyncio.wait_for(sub.queue.get(), timeout=15)
-                except asyncio.TimeoutError:
-                    yield ": keep-alive\n\n"
-                    continue
-                yield sse_format(msg["id"], msg["kind"], msg["payload"])
-        finally:
-            await bus.unsubscribe("*", sub)
-
-    return StreamingResponse(gen(), media_type="text/event-stream",
+    """Canale globale per dashboard/chat/stats, con replay Last-Event-ID (4.15)."""
+    stream = global_event_stream(_last_event_id(request))
+    return StreamingResponse(stream, media_type="text/event-stream",
                              headers=_SSE_HEADERS)
