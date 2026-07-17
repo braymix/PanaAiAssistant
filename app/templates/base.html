@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0f14" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/static/icon-192.png" />
+  <link rel="stylesheet" href="/static/app.css" />
+  <title>{% block title %}Argo{% endblock %}</title>
+</head>
+<body>
+  <header class="topbar">
+    <a class="back" href="/">Argo</a>
+    {% block header_extra %}{% endblock %}
+  </header>
+  <main class="content">
+    {% block content %}{% endblock %}
+  </main>
+  {% block footer %}{% endblock %}
+  <script src="/static/app.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

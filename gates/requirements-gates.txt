@@ -1,0 +1,7 @@
+# Dipendenze per eseguire i GATE (§6). Python 3.12.
+claude-agent-sdk==0.2.120
+anyio
+fastapi
+uvicorn
+py-vapid
+pywebpush

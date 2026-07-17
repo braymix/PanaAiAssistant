@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Argo · chat{% endblock %}
+{% block header_extra %}
+<label class="toggle">
+  <input type="checkbox" id="plan-mode" {% if not conversation or conversation['plan_mode'] %}checked{% endif %}>
+  <span>Piano</span>
+</label>
+{% endblock %}
+{% block content %}
+<div id="messages" class="messages" data-cid="{{ conversation['id'] if conversation else '' }}">
+  {% for m in messages %}
+  <div class="msg {{ m['role'] }}"><div class="bubble">{{ m['content'] }}</div></div>
+  {% endfor %}
+</div>
+{% endblock %}
+{% block footer %}
+<div class="composer">
+  <textarea id="input" rows="1" placeholder="Scrivi al planner…"></textarea>
+  <div class="composer-actions">
+    <button class="btn" id="send">Invia</button>
+    <!-- il tasto VIA E' l'approvazione del piano (§3.2) -->
+    <button class="btn primary" id="via">VIA ▶</button>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  const CID = "{{ conversation['id'] if conversation else '' }}";
+  const REPO = "{{ repo }}";
+  Argo.wireChat(CID, REPO);
+</script>
+{% endblock %}

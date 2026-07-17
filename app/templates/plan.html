@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Argo · piano{% endblock %}
+{% block content %}
+<h2>Approva il piano</h2>
+<p class="muted">{{ summary }}</p>
+
+<!-- §3.2: mostra i file che verranno toccati: e' QUELLO che stai approvando -->
+<h3>File nel perimetro</h3>
+<ul class="files">
+  {% for f in all_files %}<li><code>{{ f }}</code></li>{% endfor %}
+</ul>
+
+<div id="pending" class="pending" hidden>
+  <h3>Approvazioni in attesa</h3>
+  <ul id="pending-list" class="list"></ul>
+</div>
+
+<h3>Task ({{ tasks|length }})</h3>
+<ol class="tasks">
+  {% for t in tasks %}
+  {% set b = briefs[loop.index0] %}
+  <li data-task="{{ t['id'] }}">
+    <div class="t-head">
+      <span class="t-title">{{ t['title'] }}</span>
+      <span class="badge" data-status>{{ t['status'] }}</span>
+    </div>
+    <div class="t-verify">verify: <code>{{ b.get('verify_cmd', '') }}</code></div>
+    <div class="t-files">{{ b.get('files_allowed', [])|join(', ') }}</div>
+    {% if b.get('depends_on') %}<div class="t-deps">dopo: {{ b['depends_on']|join(', ') }}</div>{% endif %}
+  </li>
+  {% endfor %}
+</ol>
+{% endblock %}
+{% block footer %}
+<div class="actionbar two">
+  <a class="btn ghost wide" href="/chat/{{ plan['conversation_id'] }}">Torna</a>
+  <button class="btn primary wide" id="approve" data-plan="{{ plan['id'] }}">Esegui</button>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  const PLAN_ID = "{{ plan['id'] }}";
+  document.getElementById('approve').onclick = async function () {
+    this.disabled = true; this.textContent = 'In esecuzione…';
+    await Argo.approvePlan(PLAN_ID);      // resta sulla pagina e monitora
+    Argo.monitorPlan(PLAN_ID);
+  };
+  // se il piano e' gia' in esecuzione/finito, monitora subito
+  if ("{{ plan['status'] }}" !== "draft") Argo.monitorPlan(PLAN_ID);
+</script>
+{% endblock %}

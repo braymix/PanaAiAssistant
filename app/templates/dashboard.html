@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Argo · dashboard{% endblock %}
+{% block content %}
+
+<!-- M5: stats live, leggibili in 2 secondi (§4.14) -->
+<section class="stats" id="stats" aria-live="polite">
+  <div class="stat"><span class="k" id="s-active">–</span><span class="l">run attivi</span></div>
+  <div class="stat"><span class="k" id="s-cost">$–</span><span class="l">oggi</span></div>
+  <div class="stat"><span class="k" id="s-queue">–</span><span class="l">coda Ollama</span></div>
+  <div class="stat"><span class="k" id="s-pending">–</span><span class="l">approv. pend.</span></div>
+  <div class="stat"><span class="k" id="s-done">–</span><span class="l">task done</span></div>
+  <div class="stat"><span class="k" id="s-failed">–</span><span class="l">falliti</span></div>
+  <div class="stat"><span class="k" id="s-esc">–</span><span class="l">escalation</span></div>
+  <div class="stat"><span class="k" id="s-push">–</span><span class="l">push (qualità piano)</span></div>
+</section>
+
+<h2>Progetto</h2>
+<select id="project" class="select"><option value="">— scegli repo —</option></select>
+<details class="add-proj">
+  <summary>+ nuovo progetto</summary>
+  <input id="p-name" class="inp" placeholder="nome" />
+  <input id="p-repo" class="inp" placeholder="repo_path (dentro una root)" />
+  <button class="btn ghost" id="add-project">Aggiungi</button>
+</details>
+
+{% if plans %}
+<h2>Piani recenti</h2>
+<ul class="list">
+  {% for p in plans %}
+  <li><a href="/plans/{{ p['id'] }}">{{ p['n_tasks'] }} task
+    <span class="badge b-{{ p['status'] }}">{{ p['status'] }}</span></a></li>
+  {% endfor %}
+</ul>
+{% endif %}
+
+<h2>Conversazioni</h2>
+<ul class="list">
+  {% for c in conversations %}
+  <li><a href="/chat/{{ c['id'] }}">{{ c['title'] }}</a></li>
+  {% else %}
+  <li class="muted">Nessuna conversazione.</li>
+  {% endfor %}
+</ul>
+
+<div id="live-log" class="log" aria-live="polite"></div>
+
+{% endblock %}
+{% block footer %}
+<!-- azioni primarie nel terzo inferiore (§4.11) -->
+<div class="actionbar">
+  <button class="btn ghost" id="install">Installa PWA</button>
+  <button class="btn" id="enable-push">Attiva push</button>
+  <button class="btn primary" id="new-chat">Nuova chat</button>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+  Argo.pollStats();
+  Argo.subscribeGlobal((ev) => Argo.appendLog('live-log', ev));
+  Argo.loadProjects();
+  document.getElementById('add-project').onclick = Argo.addProject;
+  document.getElementById('new-chat').onclick = Argo.newChatWithProject;
+  document.getElementById('enable-push').onclick = Argo.enablePush;
+  Argo.wireInstall('install');
+</script>
+{% endblock %}

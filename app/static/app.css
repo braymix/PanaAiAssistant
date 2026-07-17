@@ -1,0 +1,131 @@
+/* Argo — mobile-first, dark di default (§4.13). Baseline 380px, testa a 360px.
+   Nessuno scroll orizzontale, mai (§4.9). */
+:root {
+  color-scheme: dark;
+  --bg: #0b0f14; --panel: #11161d; --line: #1f2933;
+  --fg: #e6edf3; --muted: #8fa1b3; --accent: #4cc2ff;
+  --danger: #ff5c66; --ok: #37d67a;
+}
+* { box-sizing: border-box; }
+html, body { overflow-x: hidden; }         /* la pagina non si allarga MAI */
+body {
+  margin: 0; min-height: 100dvh; background: var(--bg); color: var(--fg);
+  font: 16px/1.5 system-ui, -apple-system, sans-serif;
+  display: flex; flex-direction: column;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+a { color: var(--accent); text-decoration: none; }
+code { font-family: ui-monospace, Menlo, monospace; word-break: break-all; }
+.muted { color: var(--muted); }
+
+.topbar {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: max(10px, env(safe-area-inset-top)) 16px 10px;
+  background: var(--bg); border-bottom: 1px solid var(--line);
+}
+.topbar .back { font-weight: 700; font-size: 18px; color: var(--fg); }
+.content { flex: 1; padding: 14px 16px 92px; }
+h2 { font-size: 18px; margin: 14px 0 8px; }
+h3 { font-size: 15px; margin: 16px 0 6px; color: var(--muted); }
+
+/* stats (M5) */
+.stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+@media (min-width: 380px) { .stats { grid-template-columns: repeat(4, 1fr); } }
+.stat {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  padding: 10px; display: flex; flex-direction: column; gap: 2px;
+}
+.stat .k { font-size: 20px; font-weight: 700; }
+.stat .l { font-size: 11px; color: var(--muted); }
+
+.list { list-style: none; padding: 0; margin: 8px 0; }
+.list li { padding: 14px 12px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 12px; margin-bottom: 8px; }
+
+.log, .messages { display: flex; flex-direction: column; gap: 8px; }
+.log { margin-top: 12px; font: 13px/1.4 ui-monospace, monospace;
+  color: var(--muted); word-break: break-word; }
+
+/* chat */
+.messages { padding-bottom: 12px; }
+.msg { display: flex; }
+.msg.user { justify-content: flex-end; }
+.bubble { max-width: 85%; padding: 10px 12px; border-radius: 14px;
+  background: var(--panel); border: 1px solid var(--line);
+  white-space: pre-wrap; word-break: break-word; }
+.msg.user .bubble { background: #16324a; border-color: #1d4a6b; }
+
+/* composer + actionbar: azioni in basso (§4.11) */
+.composer, .actionbar, .approve-bar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 6;
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+  background: var(--bg); border-top: 1px solid var(--line);
+}
+.composer { display: flex; flex-direction: column; gap: 8px; }
+.composer textarea {
+  width: 100%; resize: none; border-radius: 12px; padding: 12px;
+  background: var(--panel); border: 1px solid var(--line); color: var(--fg);
+  font: 16px/1.4 system-ui; max-height: 40vh;
+}
+.composer-actions { display: flex; gap: 12px; }
+.actionbar { display: flex; gap: 12px; }
+.actionbar.two .wide, .composer-actions .btn { flex: 1; }
+
+/* tap target ≥44px; bottoni primari ≥56px (§4.12) */
+.btn {
+  min-height: 48px; border: 0; border-radius: 14px; padding: 0 16px;
+  font-size: 16px; font-weight: 600; color: #04121f; background: var(--accent);
+  -webkit-tap-highlight-color: transparent; flex: 1;
+}
+.btn.primary { background: var(--accent); }
+.btn.ghost { background: var(--panel); color: var(--fg);
+  border: 1px solid var(--line); }
+.btn.wide { flex: 1; }
+
+/* card di approvazione (§4.12): Deny sinistra, Allow destra, ≥56px, gap ≥24px */
+.tool-name { font-size: 20px; font-weight: 700; margin: 6px 0; }
+.approval-status { color: var(--muted); font-size: 13px; }
+.rawbox {
+  background: #05080c; border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px; margin-top: 12px; font: 13px/1.45 ui-monospace, monospace;
+  overflow-x: auto; max-height: 45vh; white-space: pre; word-break: normal;
+}
+.approve-bar { display: flex; gap: 24px; }
+.approve-bar .btn { min-height: 56px; font-size: 18px; }
+.btn.deny { background: var(--danger); color: #1a0304; order: 0; }
+.btn.allow { background: var(--ok); color: #04140a; order: 1; }
+
+.toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
+.select, .inp {
+  width: 100%; min-height: 48px; margin: 6px 0; padding: 0 12px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+  color: var(--fg); font-size: 16px;
+}
+.inp { padding: 12px; }
+.add-proj { margin: 8px 0 4px; color: var(--muted); }
+.add-proj summary { min-height: 44px; display: flex; align-items: center; }
+.files, .tasks { padding-left: 18px; }
+.tasks li { background: var(--panel); border: 1px solid var(--line);
+  border-radius: 12px; padding: 10px; margin-bottom: 8px; list-style: none; }
+.t-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.t-title { font-weight: 600; }
+.t-verify, .t-files, .t-deps { font-size: 13px; color: var(--muted); word-break: break-all; }
+.badge { font-size: 12px; font-weight: 700; padding: 3px 8px; border-radius: 999px;
+  background: var(--line); color: var(--fg); white-space: nowrap; }
+.b-pending { background: #2a333d; color: var(--muted); }
+.b-running { background: #16324a; color: #7cc7ff; }
+.b-done { background: #123a24; color: var(--ok); }
+.b-failed { background: #3a1416; color: var(--danger); }
+.b-esc { background: #3a2e12; color: #ffca4c; }
+.b-executing { background: #16324a; color: #7cc7ff; }
+.b-draft, .b-approved { background: #2a333d; color: var(--muted); }
+.pending { margin-top: 10px; }
+.pending .list li a { color: #ffca4c; }
+
+.run-meta { display: flex; align-items: center; gap: 8px; margin: 6px 0 12px; }
+.ev { padding: 6px 8px; border-radius: 8px; background: var(--panel);
+  border: 1px solid var(--line); white-space: pre-wrap; word-break: break-word; }
+.ev.ok { border-color: #1b5e3a; } .ev.fail, .ev.deny { border-color: #5e1b1f; }
+.ev.tool { color: #7cc7ff; } .ev.appr { color: #ffca4c; }
+.ev.auto { color: var(--muted); }

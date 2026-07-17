@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0f14" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/icon-192.png" />
+  <title>Argo GATE 0</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100dvh;
+      background: #0b0f14; color: #e6edf3;
+      font: 16px/1.5 system-ui, -apple-system, sans-serif;
+      display: flex; flex-direction: column;
+      padding: max(16px, env(safe-area-inset-top)) 16px
+               max(16px, env(safe-area-inset-bottom));
+    }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    p  { margin: 0 0 12px; color: #9fb0c0; }
+    /* §4.11: azioni primarie nel terzo inferiore. Il log in alto, i bottoni in basso. */
+    #log {
+      flex: 1; overflow-y: auto; margin: 12px 0;
+      background: #11161d; border: 1px solid #1f2933; border-radius: 10px;
+      padding: 12px; font: 13px/1.45 ui-monospace, Menlo, monospace;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    .actions { display: flex; flex-direction: column; gap: 12px; }
+    button {
+      min-height: 56px; border: 0; border-radius: 14px;
+      font-size: 17px; font-weight: 600; color: #04121f;
+      background: #4cc2ff; -webkit-tap-highlight-color: transparent;
+    }
+    button:disabled { background: #33424f; color: #7c8b98; }
+    .hint { font-size: 13px; color: #7c8b98; text-align: center; }
+  </style>
+</head>
+<body>
+  <h1>Argo · GATE 0</h1>
+  <p>Installa in Home (iOS: Condividi → Aggiungi a Home), poi Iscrivi.</p>
+
+  <div id="log">pronto.</div>
+
+  <div class="actions">
+    <button id="subscribe">Iscrivi a push</button>
+    <p class="hint" id="hint">In standalone: <span id="standalone">?</span></p>
+  </div>
+
+  <script>
+    const logEl = document.getElementById('log');
+    const log = (m) => { logEl.textContent += '\n' + m; logEl.scrollTop = logEl.scrollHeight; };
+    const b64ToU8 = (b64) => {
+      const pad = '='.repeat((4 - b64.length % 4) % 4);
+      const s = (b64 + pad).replace(/-/g, '+').replace(/_/g, '/');
+      const raw = atob(s);
+      return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+    };
+
+    const standalone = window.matchMedia('(display-mode: standalone)').matches
+      || window.navigator.standalone === true;
+    document.getElementById('standalone').textContent = standalone ? 'SI ✅' : 'NO ❌ (installa in Home)';
+
+    async function main() {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        log('❌ push non supportata da questo browser/contesto.');
+        return;
+      }
+      const reg = await navigator.serviceWorker.register('/sw.js');
+      log('service worker registrato.');
+
+      document.getElementById('subscribe').addEventListener('click', async () => {
+        try {
+          const perm = await Notification.requestPermission();
+          log('permesso notifiche: ' + perm);
+          if (perm !== 'granted') return;
+
+          const keyResp = await fetch('/vapid-public-key');
+          const { publicKey } = await keyResp.json();
+          const sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: b64ToU8(publicKey),
+          });
+          await fetch('/subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(sub),
+          });
+          log('✅ iscritto. Ora dal PC:  python send_push.py');
+          log('Blocca il telefono, mettilo in tasca, aspetta 60s.');
+        } catch (e) {
+          log('❌ ' + (e && e.message ? e.message : e));
+        }
+      });
+    }
+    main();
+  </script>
+</body>
+</html>
