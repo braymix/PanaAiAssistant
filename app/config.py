@@ -56,6 +56,24 @@ class Settings:
     # backend abbonamento (planner + escalation)
     subscription_model: str = os.environ.get("ARGO_SUB_MODEL", "")  # "" = default SDK
 
+    # --- autofix loop feedback-driven (missione autofix) ------------------------
+    # numero di tentativi PER TIER locale (include il tentativo iniziale). Deve
+    # restare coerente/subordinato a max_local_retries: qui e' il conteggio dei
+    # tentativi per tier, non un budget globale.
+    autofix_max_rounds: int = int(os.environ.get("ARGO_AUTOFIX_MAX_ROUNDS", "3"))
+    # modelli Ollama piu' forti da provare dopo il primario, in ordine (os.pathsep).
+    # vuoto (default) = solo il modello primario, comportamento retro-compatibile.
+    autofix_local_tiers: list[str] = field(
+        default_factory=lambda: _env_list("ARGO_AUTOFIX_LOCAL_TIERS"))
+    # righe di coda dell'output/diff da iniettare nel fix-brief (§7).
+    autofix_diff_tail_lines: int = int(
+        os.environ.get("ARGO_AUTOFIX_DIFF_TAIL_LINES", "80"))
+    # se true e il repo e' git: `git checkout --` sui soli files_allowed prima di
+    # ogni tentativo, per ripartire pulito invece di costruire sul lavoro parziale.
+    autofix_reset_between_attempts: bool = (
+        os.environ.get("ARGO_AUTOFIX_RESET", "0") == "1"
+    )
+
     # --- approvazioni (regola 4.6: il timeout NEGA) -----------------------------
     approval_timeout_s: int = int(os.environ.get("ARGO_APPROVAL_TIMEOUT_S", "300"))
 

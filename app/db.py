@@ -36,14 +36,16 @@ CREATE TABLE IF NOT EXISTS plan_document(
 CREATE TABLE IF NOT EXISTS task(
   id TEXT PRIMARY KEY, plan_id TEXT, seq INTEGER, title TEXT,
   brief_json TEXT, status TEXT, backend TEXT,
-  attempts INTEGER DEFAULT 0, verify_output TEXT, depends_on TEXT
+  attempts INTEGER DEFAULT 0, verify_output TEXT, depends_on TEXT,
+  autofix_round INTEGER DEFAULT 0, failure_class TEXT
 );
 
 CREATE TABLE IF NOT EXISTS run(
   id TEXT PRIMARY KEY, task_id TEXT, conversation_id TEXT,
   session_id TEXT, backend TEXT, model TEXT,
   status TEXT, cost_usd REAL, turns INTEGER,
-  started_at TEXT, ended_at TEXT, error TEXT
+  started_at TEXT, ended_at TEXT, error TEXT,
+  attempt INTEGER, failure_class TEXT
 );
 
 CREATE TABLE IF NOT EXISTS event(
@@ -97,6 +99,21 @@ class Database:
         if "mode" not in cols:
             self.execute(
                 "ALTER TABLE conversation ADD COLUMN mode TEXT DEFAULT 'generic'")
+
+        # --- autofix (missione autofix): traccia round e diagnosi sul task e la
+        #     classe di fallimento per-tentativo sul run (append-only).
+        task_cols = [r["name"] for r in self.query("PRAGMA table_info(task)")]
+        if "autofix_round" not in task_cols:
+            self.execute(
+                "ALTER TABLE task ADD COLUMN autofix_round INTEGER DEFAULT 0")
+        if "failure_class" not in task_cols:
+            self.execute("ALTER TABLE task ADD COLUMN failure_class TEXT")
+
+        run_cols = [r["name"] for r in self.query("PRAGMA table_info(run)")]
+        if "attempt" not in run_cols:
+            self.execute("ALTER TABLE run ADD COLUMN attempt INTEGER")
+        if "failure_class" not in run_cols:
+            self.execute("ALTER TABLE run ADD COLUMN failure_class TEXT")
 
     def _init_pragmas(self) -> None:
         cur = self._conn.cursor()
