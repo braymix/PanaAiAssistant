@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS task(
   id TEXT PRIMARY KEY, plan_id TEXT, seq INTEGER, title TEXT,
   brief_json TEXT, status TEXT, backend TEXT,
   attempts INTEGER DEFAULT 0, verify_output TEXT, depends_on TEXT,
-  autofix_round INTEGER DEFAULT 0, failure_class TEXT
+  autofix_round INTEGER DEFAULT 0, failure_class TEXT, tier TEXT
 );
 
 CREATE TABLE IF NOT EXISTS run(
@@ -108,6 +108,9 @@ class Database:
                 "ALTER TABLE task ADD COLUMN autofix_round INTEGER DEFAULT 0")
         if "failure_class" not in task_cols:
             self.execute("ALTER TABLE task ADD COLUMN failure_class TEXT")
+        # --- settorializzazione (routing per peso): tier scelto dal router.
+        if "tier" not in task_cols:
+            self.execute("ALTER TABLE task ADD COLUMN tier TEXT")
 
         run_cols = [r["name"] for r in self.query("PRAGMA table_info(run)")]
         if "attempt" not in run_cols:

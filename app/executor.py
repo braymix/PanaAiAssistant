@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import json
 import subprocess
-from dataclasses import dataclass
 from pathlib import Path
 
 from .autofix import (
@@ -23,47 +22,63 @@ from .autofix import (
 )
 from .backends import make_executor_options
 from .briefs import TaskBrief
-from .config import get_settings
+from .config import get_settings, patience_policy
 from .db import get_db, utcnow
 from .events import get_bus
+from .hardware import get_profile
 from .ids import new_id
 from .policy import GateContext, make_policy_gate
 from .push import send_push
+from .router import (
+    RouteDecision, estimate_complexity, next_tier, route, tier_warnings,
+)
+from .scheduler import VramScheduler
 from .security import resolve_within_roots, PathNotAllowed
-
-
-@dataclass
-class _Tier:
-    """Un livello della scala di autofix (missione autofix).
-
-    backend: "ollama" | "subscription"; model: override del modello (None = default
-    del backend); is_local: True per i tier Ollama; is_escalation: True SOLO per il
-    tier abbonamento (mantiene l'evento 'escalation' + push legacy, §4.3).
-    """
-    backend: str
-    model: str | None
-    label: str            # "ollama" | "ollama:<model>" | "subscription"
-    is_local: bool
-    rounds: int
-    is_escalation: bool
 
 
 class ExecutorPool:
     def __init__(self) -> None:
         self.settings = get_settings()
-        self.sem = asyncio.Semaphore(self.settings.max_local_concurrency)
         self._done_events: dict[str, asyncio.Event] = {}
         self._task_ok: dict[str, bool] = {}
         self.pushes = {"pushes": 0}  # metrica qualita' piano (§3.2), esposta in stats
         self.queue_depth = 0
         # classe client iniettabile (i test ne passano una finta; a runtime e' l'SDK)
         self._client_cls = None
+        # settorializzazione (§A.6): scheduler VRAM-aware, profilo e pazienza lazy.
+        self._scheduler: VramScheduler | None = None
+        self._profile_cache = None
+        self._config_warned = False
 
     def _get_client_cls(self):
         if self._client_cls is None:
             from claude_agent_sdk import ClaudeSDKClient
             self._client_cls = ClaudeSDKClient
         return self._client_cls
+
+    # --- settorializzazione: profilo hardware, scheduler, pazienza --------------
+    def _profile(self):
+        if self._profile_cache is None:
+            self._profile_cache = get_profile(self.settings)
+        return self._profile_cache
+
+    @property
+    def scheduler(self) -> VramScheduler:
+        if self._scheduler is None:
+            self._scheduler = VramScheduler.from_profile(self._profile(), self.settings)
+        return self._scheduler
+
+    def _policy(self):
+        return patience_policy(self.settings.patience)
+
+    async def _warn_config_once(self) -> None:
+        """Emette i config_warning (§A.8) una sola volta: modelli del registro non
+        installati in Ollama."""
+        if self._config_warned:
+            return
+        self._config_warned = True
+        for detail in tier_warnings(self._profile(), self.settings.model_tiers):
+            await get_bus().emit(None, "config_warning", {"detail": detail})
 
     # --- ingresso: il tasto VIA ha gia' creato il piano; qui parte l'esecuzione --
     async def approve_and_run(self, plan_id: str) -> None:
@@ -95,6 +110,7 @@ class ExecutorPool:
             "UPDATE plan_document SET status='executing', approved_at=? WHERE id=?",
             (utcnow(), plan_id),
         )
+        await self._warn_config_once()  # §A.8: modelli del registro non installati
 
         task_rows = db.query(
             "SELECT * FROM task WHERE plan_id=? ORDER BY seq ASC", (plan_id,)
@@ -144,28 +160,37 @@ class ExecutorPool:
                     self.queue_depth -= 1
                     return
 
-        async with self.sem:
-            ok = await self._execute_task(task_row, brief, repo, roots)
+        # NB: l'ammissione (scheduler VRAM-aware, §A.6) e' ora DENTRO _execute_task,
+        # per-tier: il peso dipende dalla RouteDecision del tier corrente.
+        ok = await self._execute_task(task_row, brief, repo, roots)
         self._task_ok[task_row["id"]] = ok
         self._done_events[task_row["id"]].set()
         self.queue_depth -= 1
 
-    def _autofix_tiers(self, brief: TaskBrief) -> list[_Tier]:
-        """La scala di autofix (missione autofix): Ollama primario -> eventuali
-        modelli locali piu' forti -> abbonamento (l'escalation esistente).
+    def _route_ladder(self, brief: TaskBrief) -> tuple[RouteDecision, list[RouteDecision]]:
+        """La scala di autofix E' la scala di escalation del router (§A.5/A.7).
 
-        I round del tier locale sono subordinati a max_local_retries: senza le
-        nuove env il comportamento resta quello attuale (Ollama -> retry ->
-        escalation), solo informato dall'errore invece che cieco.
+        Parte dal tier ROUTATO (settorializzazione per peso/hardware/pazienza) e
+        risale via `next_tier` fino a 'frontier' (subscription). I modelli locali
+        che non entrano in VRAM sono gia' esclusi da `available_tiers`.
         """
-        s = self.settings
-        local_rounds = max(1, min(s.autofix_max_rounds, s.max_local_retries + 1))
-        tiers = [_Tier("ollama", None, "ollama", True, local_rounds, False)]
-        for m in s.autofix_local_tiers:
-            tiers.append(_Tier("ollama", m, f"ollama:{m}", True, local_rounds, False))
-        # tier abbonamento: 1 tentativo, come l'escalation di oggi (§3.5/M4).
-        tiers.append(_Tier("subscription", None, "subscription", False, 1, True))
-        return tiers
+        profile = self._profile()
+        tiers = self.settings.model_tiers
+        policy = self._policy()
+        headroom = self.settings.vram_headroom_mb
+
+        first = route(brief, profile, tiers, policy, headroom)
+        ladder = [first]
+        seen = {first.tier}
+        cur = first.tier
+        while True:
+            nxt = next_tier(cur, brief, profile, tiers, policy, headroom)
+            if nxt is None or nxt.tier in seen:
+                break
+            ladder.append(nxt)
+            seen.add(nxt.tier)
+            cur = nxt.tier
+        return first, ladder
 
     async def _execute_task(self, task_row, brief: TaskBrief, repo: Path,
                             roots) -> bool:
@@ -193,103 +218,144 @@ class ExecutorPool:
 
         history: list[AttemptRecord] = []
         attempt = 0                      # contatore globale dei tentativi
-        tiers = self._autofix_tiers(brief)
+        first, ladder = self._route_ladder(brief)
+
+        # settorializzazione: registra la decisione di routing (§A.8).
+        await bus.emit(None, "route_decision", {
+            "task_id": task_id,
+            "complexity": brief.complexity or estimate_complexity(brief),
+            "criticality": brief.criticality,
+            "tier": first.tier, "model": first.model,
+            "weight": first.concurrency_weight, "reason": first.reason,
+        })
+        db.execute("UPDATE task SET tier=? WHERE id=?", (first.tier, task_id))
+
+        # budget di tentativi LOCALI: preserva la semantica autofix esistente
+        # (backward compat), condiviso fra i tier locali della scala. Esaurito il
+        # budget locale si salta a 'frontier' (subscription).
+        local_budget = max(1, min(self.settings.autofix_max_rounds,
+                                  self.settings.max_local_retries + 1))
+        remaining_local = local_budget
         prev_label: str | None = None
 
-        for tier in tiers:
+        for decision in ladder:
+            is_local = decision.backend == "ollama"
+            if is_local and remaining_local <= 0:
+                continue  # budget locale esaurito: prova gli eventuali tier sup.
+            rounds = decision.autofix_local_rounds if is_local else 1
+            if is_local:
+                rounds = min(rounds, remaining_local)
+            if rounds <= 0:
+                continue
+
+            label = decision.tier if is_local else "subscription"
             if prev_label is not None:
                 await bus.emit(None, "autofix_escalate_tier", {
-                    "task_id": task_id, "from": prev_label, "to": tier.label,
+                    "task_id": task_id, "from": prev_label, "to": label,
                 })
-            if tier.is_escalation:
-                # escalation esistente (§3.5/M4): evento + push col testo attuale.
+            if not is_local:
+                # escalation a 'frontier' (subscription): evento + push (§3.5/M4).
                 db.execute("UPDATE task SET status='escalated' WHERE id=?", (task_id,))
                 await bus.emit(None, "escalation", {
                     "task_id": task_id,
-                    "reason": "MAX_LOCAL_RETRIES esaurito su Ollama",
+                    "reason": f"scala locale esaurita -> {decision.tier}",
                 })
                 send_push("Argo · escalation",
                           f"Task '{brief.title}' passato all'abbonamento", url="/")
-            prev_label = tier.label
+            prev_label = label
 
-            for _ in range(tier.rounds):
-                attempt += 1
+            # ammissione VRAM-aware per QUESTO tier (§A.6): il peso e' quello del
+            # tier corrente; il rilascio e' garantito (anche su cancel, Parte B).
+            await self.scheduler.acquire(
+                decision.concurrency_weight, is_local=is_local)
+            try:
+                passed = False
+                for _ in range(rounds):
+                    attempt += 1
+                    if is_local:
+                        remaining_local -= 1
 
-                # reset opzionale tra i tentativi (§6): riparte pulito sui soli
-                # files_allowed se il repo e' git.
-                if history and self.settings.autofix_reset_between_attempts:
-                    self._git_reset_perimeter(repo, brief.files_allowed)
+                    # reset opzionale tra i tentativi (§6): riparte pulito sui soli
+                    # files_allowed se il repo e' git.
+                    if history and self.settings.autofix_reset_between_attempts:
+                        self._git_reset_perimeter(repo, brief.files_allowed)
 
-                # INVARIANTE 2 (guardia esplicita): il verify_cmd non e' cambiato.
-                self._guard_verify_cmd(brief, original_verify_cmd)
+                    # INVARIANTE 2 (guardia): il verify_cmd non e' cambiato.
+                    self._guard_verify_cmd(brief, original_verify_cmd)
 
-                # tentativo 1: prompt originale (invariato). Poi: fix-brief con la
-                # storia completa dei fallimenti (missione autofix).
-                if not history:
-                    prompt = _executor_prompt(brief)
-                else:
-                    diff_tail = git_diff_tail(
-                        repo, brief.files_allowed,
-                        self.settings.autofix_diff_tail_lines)
-                    prompt = build_fix_prompt(
-                        brief, history, diff_tail,
-                        self.settings.autofix_diff_tail_lines)
+                    # tentativo 1: prompt originale. Poi: fix-brief con la storia.
+                    if not history:
+                        prompt = _executor_prompt(brief)
+                    else:
+                        diff_tail = git_diff_tail(
+                            repo, brief.files_allowed,
+                            self.settings.autofix_diff_tail_lines)
+                        prompt = build_fix_prompt(
+                            brief, history, diff_tail,
+                            self.settings.autofix_diff_tail_lines)
 
-                status = "escalated" if tier.is_escalation else "running"
-                db.execute(
-                    "UPDATE task SET status=?, backend=?, attempts=?, "
-                    "autofix_round=? WHERE id=?",
-                    (status, tier.label, attempt, attempt, task_id),
-                )
+                    status = "escalated" if not is_local else "running"
+                    db.execute(
+                        "UPDATE task SET status=?, backend=?, tier=?, attempts=?, "
+                        "autofix_round=? WHERE id=?",
+                        (status, decision.backend, decision.tier, attempt,
+                         attempt, task_id),
+                    )
 
-                pre = snapshot_changes(repo, brief.files_allowed)
-                run_id, run_error, policy_events = await self._run_once(
-                    task_id, brief, repo, files_allowed, roots,
-                    tier.backend, tier.model, prompt, attempt)
-                post = snapshot_changes(repo, brief.files_allowed)
-                changed_files = diff_changed(pre, post)
+                    pre = snapshot_changes(repo, brief.files_allowed)
+                    run_id, run_error, policy_events = await self._run_once(
+                        task_id, brief, repo, files_allowed, roots,
+                        decision.backend, decision.model, prompt, attempt)
+                    post = snapshot_changes(repo, brief.files_allowed)
+                    changed_files = diff_changed(pre, post)
 
-                db.execute("UPDATE task SET status='verifying' WHERE id=?", (task_id,))
-                # verify_cmd puo' durare minuti: in un thread, altrimenti blocca il
-                # solo event loop del processo (§2: un solo processo asyncio).
-                # INVARIANTE 1: e' _run_verify (exit code) a decidere, sempre.
-                self._guard_verify_cmd(brief, original_verify_cmd)
-                passed, output = await asyncio.to_thread(
-                    self._run_verify, brief, repo, roots)
-                verify_exit = _parse_verify_exit(output)
-                db.execute("UPDATE task SET verify_output=? WHERE id=?",
-                           (output, task_id))
-                await bus.emit(None, "verify_result", {
-                    "task_id": task_id, "passed": passed,
-                    "output_tail": output[-400:],
-                })
-                await bus.emit(None, "autofix_attempt", {
-                    "task_id": task_id, "attempt": attempt,
-                    "backend": tier.label, "model": tier.model, "passed": passed,
-                })
+                    db.execute("UPDATE task SET status='verifying' WHERE id=?",
+                               (task_id,))
+                    # verify_cmd puo' durare minuti: in un thread, altrimenti blocca
+                    # il solo event loop del processo (§2). INVARIANTE 1: decide
+                    # _run_verify (exit code), sempre.
+                    self._guard_verify_cmd(brief, original_verify_cmd)
+                    passed, output = await asyncio.to_thread(
+                        self._run_verify, brief, repo, roots)
+                    verify_exit = _parse_verify_exit(output)
+                    db.execute("UPDATE task SET verify_output=? WHERE id=?",
+                               (output, task_id))
+                    await bus.emit(None, "verify_result", {
+                        "task_id": task_id, "passed": passed,
+                        "output_tail": output[-400:],
+                    })
+                    await bus.emit(None, "autofix_attempt", {
+                        "task_id": task_id, "attempt": attempt,
+                        "backend": decision.backend, "model": decision.model,
+                        "tier": decision.tier, "passed": passed,
+                    })
 
-                if passed:
-                    db.execute("UPDATE task SET status='done' WHERE id=?", (task_id,))
-                    return True
+                    if passed:
+                        db.execute("UPDATE task SET status='done' WHERE id=?",
+                                   (task_id,))
+                        return True
 
-                # diagnosi deterministica del fallimento (§3.1). Non ci si fida
-                # MAI dell'autovalutazione del modello.
-                fc = classify_failure(
-                    verify_exit=verify_exit, verify_output=output,
-                    run_error=run_error, changed_files=changed_files,
-                    policy_events=policy_events)
-                db.execute("UPDATE task SET failure_class=? WHERE id=?",
-                           (fc.value, task_id))
-                db.execute("UPDATE run SET failure_class=? WHERE id=?",
-                           (fc.value, run_id))
-                await bus.emit(run_id, "autofix_diagnose", {
-                    "task_id": task_id, "attempt": attempt,
-                    "failure_class": fc.value, "output_tail": output[-400:],
-                })
-                history.append(AttemptRecord(
-                    attempt=attempt, backend=tier.label, failure_class=fc,
-                    verify_exit=verify_exit, output_tail=output,
-                    changed_files=changed_files))
+                    # diagnosi deterministica del fallimento (§3.1). Non ci si fida
+                    # MAI dell'autovalutazione del modello.
+                    fc = classify_failure(
+                        verify_exit=verify_exit, verify_output=output,
+                        run_error=run_error, changed_files=changed_files,
+                        policy_events=policy_events)
+                    db.execute("UPDATE task SET failure_class=? WHERE id=?",
+                               (fc.value, task_id))
+                    db.execute("UPDATE run SET failure_class=? WHERE id=?",
+                               (fc.value, run_id))
+                    await bus.emit(run_id, "autofix_diagnose", {
+                        "task_id": task_id, "attempt": attempt,
+                        "failure_class": fc.value, "output_tail": output[-400:],
+                    })
+                    history.append(AttemptRecord(
+                        attempt=attempt, backend=decision.tier, failure_class=fc,
+                        verify_exit=verify_exit, output_tail=output,
+                        changed_files=changed_files))
+            finally:
+                await self.scheduler.release(
+                    decision.concurrency_weight, is_local=is_local)
 
         # RESA (§4.4 della missione): esaurita la scala, il task fallisce.
         last_fc = history[-1].failure_class.value if history else FailureClass.UNKNOWN.value

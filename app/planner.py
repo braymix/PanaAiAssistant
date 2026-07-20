@@ -57,7 +57,16 @@ VIA_SYSTEM = (
     '{"repo_path": str, "summary": str, "tasks": [TaskBrief...]}\n'
     "Ogni TaskBrief:\n"
     '{"id","title","depends_on":[],"files_allowed":[...],"context","instructions",'
-    '"acceptance","verify_cmd","verify_cwd":".","max_turns":25,"timeout_s":900}\n'
+    '"acceptance","verify_cmd","verify_cwd":".","max_turns":25,"timeout_s":900,'
+    '"complexity","criticality"}\n'
+    "SETTORIALIZZAZIONE (per il routing verso il modello giusto):\n"
+    "- complexity: stima il PESO del task, uno di \"light\" (meccanico: rename, "
+    "format, docstring, aggiunta campo), \"mid\" (lavoro normale) o \"heavy\" "
+    "(algoritmico/di design: implementazione non banale, refactor, concorrenza, "
+    "migrazione). E' una STIMA: il codice la puo' correggere.\n"
+    "- criticality: quanto e' critico che sia CORRETTO, uno di \"low\", \"normal\" "
+    "(default) o \"high\" (un errore qui e' costoso: sicurezza, dati, contratti "
+    "pubblici). I task 'high' vengono instradati a un modello piu' forte.\n"
     "REGOLE FERREE:\n"
     "- verify_cmd e' OBBLIGATORIO ed eseguibile. Un task senza verify_cmd fa "
     "RIFIUTARE tutto il piano.\n"
