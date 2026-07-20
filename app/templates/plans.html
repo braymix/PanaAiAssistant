@@ -6,7 +6,7 @@
 <h3>Piani recenti</h3>
 <ul class="rows">
   {% for p in plans %}
-  <li>
+  <li data-plan="{{ p['id'] }}">
     <a href="/plans/{{ p['id'] }}">
       <span class="r-icon" style="color:var(--violet)"><svg class="ic" aria-hidden="true"><use href="/static/icons.svg#ic-plan" /></svg></span>
       <span class="r-main">
@@ -15,9 +15,30 @@
       </span>
       <span class="badge b-{{ p['status'] }}">{{ p['status'] }}</span>
     </a>
+    <div class="t-actions" style="padding:0 14px 12px">
+      {% if p['status'] in ('executing', 'running') %}
+      <button class="mini" onclick="Argo.planListAction('cancel', '{{ p['id'] }}')">■ Annulla</button>
+      {% endif %}
+      <button class="mini" onclick="Argo.planListAction('delete', '{{ p['id'] }}')">🗑 Elimina</button>
+    </div>
   </li>
   {% else %}
   <li class="empty" style="border:0;background:none">Nessun piano.</li>
   {% endfor %}
 </ul>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // rimozione live su eliminazioni (proprie o da altri client, §4.15).
+  Argo.subscribeGlobal((ev) => {
+    if (ev.kind === 'plan_deleted' || ev.kind === 'plan_purged') {
+      try {
+        const id = JSON.parse(ev.data).plan_id;
+        const li = document.querySelector('[data-plan="' + id + '"]');
+        if (li) li.remove();
+      } catch (e) {}
+    }
+  });
+</script>
 {% endblock %}

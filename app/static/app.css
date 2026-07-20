@@ -196,6 +196,12 @@ h3:first-child { margin-top: 0; }
 .recent-row .rt { flex: 1; font-size: 14px; font-weight: 500; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .recent-row .time { font-size: 11px; color: var(--muted2); flex-shrink: 0; }
+.recent-row .row-del {
+  flex-shrink: 0; border: 0; background: none; color: var(--muted2);
+  font-size: 15px; padding: 4px 6px; border-radius: 8px; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.recent-row .row-del:active { background: rgba(255,92,102,.18); color: var(--danger); }
 .empty { color: var(--muted); font-size: 14px; padding: 4px 2px; }
 
 /* chip di stato riusabili (recenti, run-meta, badge) */

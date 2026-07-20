@@ -13,8 +13,8 @@ from ..db import get_db
 from ..events import get_bus
 from ..executor import get_pool
 from ..lifecycle import (
-    LifecycleConflict, purge_conversation, purge_plan, soft_delete_conversation,
-    soft_delete_plan, soft_delete_task,
+    LifecycleConflict, delete_run, purge_conversation, purge_plan,
+    soft_delete_conversation, soft_delete_plan, soft_delete_task,
 )
 
 router = APIRouter()
@@ -39,6 +39,37 @@ async def cancel_task(task_id: str):
         raise HTTPException(status_code=404, detail="task inesistente")
     acted = await get_pool().cancel_task(task_id)
     return {"status": "cancelled" if acted else "noop", "task_id": task_id}
+
+
+# =============================================================================
+# run: STOP (ferma il lavoro sottostante) + elimina
+# =============================================================================
+@router.post("/runs/{run_id}/stop")
+async def stop_run(run_id: str):
+    """Ferma un run in corso: se ha un task, annulla il task (che uccide il verify
+    e la coroutine); i run del planner (senza task) non hanno nulla da fermare."""
+    db = get_db()
+    row = db.query_one("SELECT task_id FROM run WHERE id=?", (run_id,))
+    if not row:
+        raise HTTPException(status_code=404, detail="run inesistente")
+    if not row["task_id"]:
+        return {"status": "noop", "run_id": run_id,
+                "detail": "run senza task (planner): niente da fermare"}
+    acted = await get_pool().cancel_task(row["task_id"])
+    return {"status": "stopped" if acted else "noop", "run_id": run_id}
+
+
+@router.delete("/runs/{run_id}")
+async def delete_run_route(run_id: str):
+    db = get_db()
+    if not db.query_one("SELECT id FROM run WHERE id=?", (run_id,)):
+        raise HTTPException(status_code=404, detail="run inesistente")
+    try:
+        delete_run(db, run_id)
+    except LifecycleConflict as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    await get_bus().emit(None, "run_deleted", {"run_id": run_id})
+    return {"status": "deleted", "run_id": run_id}
 
 
 # =============================================================================

@@ -6,7 +6,7 @@
 <h3>Run recenti</h3>
 <ul class="rows">
   {% for r in runs %}
-  <li>
+  <li data-run="{{ r['id'] }}">
     <a href="/runs/{{ r['id'] }}">
       <span class="r-icon" style="color:var(--amber)"><svg class="ic" aria-hidden="true"><use href="/static/icons.svg#ic-run" /></svg></span>
       <span class="r-main">
@@ -15,9 +15,30 @@
       </span>
       <span class="badge b-{{ r['status'] }}">{{ r['status'] }}</span>
     </a>
+    <div class="t-actions" style="padding:0 14px 12px">
+      {% if r['status'] == 'running' %}
+      <button class="mini" onclick="Argo.runAction('stop', '{{ r['id'] }}')">■ Ferma</button>
+      {% endif %}
+      <button class="mini" onclick="Argo.runAction('delete', '{{ r['id'] }}')">🗑 Elimina</button>
+    </div>
   </li>
   {% else %}
   <li class="empty" style="border:0;background:none">Nessun run.</li>
   {% endfor %}
 </ul>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // aggiorna la lista in tempo reale su eliminazioni da altri client (§4.15).
+  Argo.subscribeGlobal((ev) => {
+    if (ev.kind === 'run_deleted') {
+      try {
+        const id = JSON.parse(ev.data).run_id;
+        const li = document.querySelector('[data-run="' + id + '"]');
+        if (li) li.remove();
+      } catch (e) {}
+    }
+  });
+</script>
 {% endblock %}

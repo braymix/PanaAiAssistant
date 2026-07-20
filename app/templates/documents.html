@@ -1,0 +1,247 @@
+{% extends "base.html" %}
+{% block title %}Argo · documenti{% endblock %}
+{% block screen_title %}Documenti{% endblock %}
+{% block header_extra %}
+<button class="mode-chip" id="new-folder" style="border:0;cursor:pointer">＋ Cartella</button>
+{% endblock %}
+
+{% block content_class %}content docs{% endblock %}
+{% block content %}
+<style>
+  .crumbs { display:flex; flex-wrap:wrap; gap:4px; align-items:center;
+            font-size:12.5px; color:var(--muted); margin:2px 0 12px; }
+  .crumbs a { color:var(--accent); }
+  .crumbs .sep { color:var(--muted2); }
+  .doc-list { display:flex; flex-direction:column; gap:8px; }
+  .doc-row { display:flex; align-items:center; gap:12px; width:100%;
+             padding:14px; border-radius:14px; background:var(--panel);
+             border:1px solid var(--line); color:var(--fg); text-align:left;
+             cursor:pointer; -webkit-tap-highlight-color:transparent; }
+  .doc-row:active { background:var(--panel2); }
+  .doc-row .emo { font-size:22px; flex-shrink:0; width:26px; text-align:center; }
+  .doc-row .info { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+  .doc-row .dn { font-size:14.5px; font-weight:600; overflow:hidden;
+                 text-overflow:ellipsis; white-space:nowrap; }
+  .doc-row .dm { font:11px/1.3 ui-monospace, monospace; color:var(--muted); }
+  .doc-row .go { width:16px; height:16px; color:var(--muted2); flex-shrink:0; }
+  /* pannello azioni (bottom sheet) */
+  .sheet-bg { position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:20;
+              display:none; }
+  .sheet-bg.on { display:block; }
+  .sheet { position:fixed; left:0; right:0; bottom:0; z-index:21;
+           background:var(--panel); border-top:1px solid var(--line);
+           border-radius:18px 18px 0 0; padding:16px 16px calc(16px + env(safe-area-inset-bottom));
+           transform:translateY(100%); transition:transform .18s ease;
+           max-width:460px; margin:0 auto; }
+  .sheet.on { transform:translateY(0); }
+  .sheet h4 { margin:0 0 4px; font-size:15px; word-break:break-all; }
+  .sheet .sk { font:11px/1.3 ui-monospace, monospace; color:var(--muted);
+               margin-bottom:14px; word-break:break-all; }
+  .sheet .act { display:flex; flex-direction:column; gap:10px; }
+  .sheet .act a, .sheet .act button {
+    display:block; width:100%; padding:15px; border-radius:13px; font-size:15px;
+    font-weight:600; text-align:center; border:1px solid var(--line);
+    background:var(--panel2); color:var(--fg); cursor:pointer; }
+  .sheet .act a.primary { background:var(--green); color:#04140a; border-color:var(--green); }
+  .doc-preview { margin-top:12px; background:var(--panel2); border:1px solid var(--line);
+                 border-radius:12px; padding:12px; }
+  .doc-preview pre { margin:0; white-space:pre-wrap; word-break:break-word;
+                     font:12.5px/1.5 ui-monospace, monospace; color:var(--fg2);
+                     max-height:50vh; overflow:auto; }
+  .doc-preview img { max-width:100%; border-radius:8px; display:block; }
+  .obs-hint { font-size:11px; color:var(--muted2); margin-top:10px; line-height:1.4; }
+</style>
+
+<nav class="crumbs" id="crumbs" aria-label="percorso"></nav>
+<div class="doc-list" id="doc-list">
+  <div class="empty">Caricamento…</div>
+</div>
+<div id="preview"></div>
+{% endblock %}
+
+{% block footer %}
+<div class="sheet-bg" id="sheet-bg"></div>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true">
+  <h4 id="sheet-name"></h4>
+  <div class="sk" id="sheet-path"></div>
+  <div class="act" id="sheet-actions"></div>
+  <div class="obs-hint" id="obs-hint" hidden>
+    Il link Obsidian funziona solo se la cartella <code>document</code> è sincronizzata
+    sul telefono come vault. In alternativa usa Anteprima o Scarica.
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const listEl = document.getElementById('doc-list');
+  const crumbsEl = document.getElementById('crumbs');
+  const previewEl = document.getElementById('preview');
+  const sheet = document.getElementById('sheet');
+  const sheetBg = document.getElementById('sheet-bg');
+  const sheetName = document.getElementById('sheet-name');
+  const sheetPath = document.getElementById('sheet-path');
+  const sheetActions = document.getElementById('sheet-actions');
+  const obsHint = document.getElementById('obs-hint');
+
+  let cfg = { obsidian_vault: '', vault_subpath: '' };
+  let cwd = '';
+
+  const EMO = { dir:'📁', md:'📝', pdf:'📕', image:'🖼️', other:'📄' };
+  const fileUrl = (rel, mode) => '/documents/file?path=' +
+    encodeURIComponent(rel) + '&mode=' + mode;
+
+  function closeSheet() { sheet.classList.remove('on'); sheetBg.classList.remove('on'); }
+  sheetBg.onclick = closeSheet;
+
+  function obsidianLink(rel) {
+    // il file nel deep link e' relativo alla RADICE del vault (vault_subpath).
+    if (!cfg.obsidian_vault) return null;
+    let f = rel;
+    const sub = (cfg.vault_subpath || '').replace(/^\/+|\/+$/g, '');
+    if (sub && (f === sub || f.startsWith(sub + '/'))) f = f.slice(sub.length).replace(/^\/+/, '');
+    return 'obsidian://open?vault=' + encodeURIComponent(cfg.obsidian_vault) +
+           '&file=' + encodeURIComponent(f);
+  }
+
+  async function showPreviewMd(rel) {
+    previewEl.innerHTML = '<div class="doc-preview">Caricamento…</div>';
+    try {
+      const r = await fetch('/documents/raw?path=' + encodeURIComponent(rel));
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        previewEl.innerHTML = '<div class="doc-preview">Anteprima non disponibile: ' +
+          (d.detail || r.statusText) + '</div>';
+        return;
+      }
+      const txt = await r.text();
+      const pre = document.createElement('pre');
+      pre.textContent = txt;
+      previewEl.innerHTML = '';
+      const box = document.createElement('div'); box.className = 'doc-preview';
+      box.appendChild(pre); previewEl.appendChild(box);
+      box.scrollIntoView({ behavior:'smooth', block:'nearest' });
+    } catch (e) {
+      previewEl.innerHTML = '<div class="doc-preview">Errore: ' + e.message + '</div>';
+    }
+  }
+
+  function showPreviewImg(rel) {
+    previewEl.innerHTML = '';
+    const box = document.createElement('div'); box.className = 'doc-preview';
+    const img = document.createElement('img'); img.src = fileUrl(rel, 'view');
+    box.appendChild(img); previewEl.appendChild(box);
+    box.scrollIntoView({ behavior:'smooth', block:'nearest' });
+  }
+
+  function openSheet(entry) {
+    sheetName.textContent = entry.name;
+    sheetPath.textContent = entry.rel_path;
+    sheetActions.innerHTML = '';
+    obsHint.hidden = true;
+    const add = (label, opts) => {
+      const el = document.createElement(opts.href ? 'a' : 'button');
+      el.textContent = label;
+      if (opts.primary) el.className = 'primary';
+      if (opts.href) { el.href = opts.href; if (opts.download) el.setAttribute('download',''); }
+      if (opts.onClick) el.onclick = opts.onClick;
+      sheetActions.appendChild(el);
+    };
+    if (entry.kind === 'md') {
+      const obs = obsidianLink(entry.rel_path);
+      if (obs) { add('Apri in Obsidian', { href: obs, primary: true }); obsHint.hidden = false; }
+      add('Anteprima', { onClick: () => { closeSheet(); showPreviewMd(entry.rel_path); } });
+      add('Scarica', { href: fileUrl(entry.rel_path, 'download'), download: true });
+    } else if (entry.kind === 'pdf') {
+      add('Visualizza', { href: fileUrl(entry.rel_path, 'view'), primary: true });
+      add('Scarica', { href: fileUrl(entry.rel_path, 'download'), download: true });
+    } else if (entry.kind === 'image') {
+      add('Anteprima', { onClick: () => { closeSheet(); showPreviewImg(entry.rel_path); }, primary: true });
+      add('Scarica', { href: fileUrl(entry.rel_path, 'download'), download: true });
+    } else {
+      add('Scarica', { href: fileUrl(entry.rel_path, 'download'), primary: true, download: true });
+    }
+    sheet.classList.add('on'); sheetBg.classList.add('on');
+  }
+
+  function renderCrumbs() {
+    crumbsEl.innerHTML = '';
+    const home = document.createElement('a');
+    home.textContent = '📁 document'; home.href = '#';
+    home.onclick = (e) => { e.preventDefault(); navigate(''); };
+    crumbsEl.appendChild(home);
+    if (!cwd) return;
+    let acc = '';
+    cwd.split('/').forEach((part) => {
+      acc = acc ? acc + '/' + part : part;
+      const sep = document.createElement('span'); sep.className = 'sep'; sep.textContent = '/';
+      crumbsEl.appendChild(sep);
+      const a = document.createElement('a'); a.textContent = part; a.href = '#';
+      const target = acc;
+      a.onclick = (e) => { e.preventDefault(); navigate(target); };
+      crumbsEl.appendChild(a);
+    });
+  }
+
+  async function navigate(rel) {
+    previewEl.innerHTML = '';
+    try {
+      const r = await fetch('/documents/tree?path=' + encodeURIComponent(rel || ''));
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        listEl.innerHTML = '<div class="empty">Errore: ' + (d.detail || r.statusText) + '</div>';
+        return;
+      }
+      const data = await r.json();
+      cwd = data.cwd || '';
+      renderCrumbs();
+      listEl.innerHTML = '';
+      if (data.parent !== null && cwd) {
+        const up = document.createElement('button'); up.className = 'doc-row';
+        up.innerHTML = '<span class="emo">↩️</span><span class="info"><span class="dn">.. (su)</span></span>';
+        up.onclick = () => navigate(data.parent);
+        listEl.appendChild(up);
+      }
+      if (!data.entries.length) {
+        const e = document.createElement('div'); e.className = 'empty';
+        e.textContent = 'Cartella vuota.'; listEl.appendChild(e);
+      }
+      data.entries.forEach((entry) => {
+        const row = document.createElement('button'); row.className = 'doc-row';
+        const kb = entry.size ? (entry.size < 1024 ? entry.size + ' B'
+          : (entry.size / 1024).toFixed(1) + ' KB') : '';
+        row.innerHTML =
+          '<span class="emo">' + (EMO[entry.kind] || '📄') + '</span>' +
+          '<span class="info"><span class="dn"></span>' +
+          (entry.is_dir ? '' : '<span class="dm">' + kb + '</span>') + '</span>' +
+          (entry.is_dir ? '<svg class="go"><use href="/static/icons.svg#ic-chevron"/></svg>' : '');
+        row.querySelector('.dn').textContent = entry.name;
+        row.onclick = () => entry.is_dir ? navigate(entry.rel_path) : openSheet(entry);
+        listEl.appendChild(row);
+      });
+    } catch (e) {
+      listEl.innerHTML = '<div class="empty">Rete non raggiungibile.</div>';
+    }
+  }
+
+  document.getElementById('new-folder').onclick = async () => {
+    const name = prompt('Nome nuova cartella / progetto:');
+    if (!name) return;
+    try {
+      const r = await fetch('/documents/folder', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ parent_rel: cwd, name }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(()=>({}))).detail || r.statusText);
+      navigate(cwd);
+    } catch (e) { alert(e.message); }
+  };
+
+  (async () => {
+    try { cfg = await (await fetch('/documents/config')).json(); } catch (e) {}
+    navigate('');
+  })();
+})();
+</script>
+{% endblock %}
