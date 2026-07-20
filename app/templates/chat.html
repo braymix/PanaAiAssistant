@@ -1,12 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Argo · chat{% endblock %}
+{% set research = conversation and conversation['mode'] == 'research' %}
+
+{% block screen_title %}{{ 'Ricerca online' if research else 'Chat generica' }}{% endblock %}
 {% block header_extra %}
-{% if conversation and conversation['mode'] == 'research' %}
-<span class="badge b-executing">🔎 Ricerca online</span>
-{% else %}
-<span class="badge">💬 Generica</span>
-{% endif %}
+<span class="mode-chip">{{ '🔎 Ricerca' if research else '💬 Generica' }}</span>
 {% endblock %}
+
+{% block content_class %}content chat{% endblock %}
 {% block content %}
 <div id="messages" class="messages" data-cid="{{ conversation['id'] if conversation else '' }}">
   {% for m in messages %}
@@ -14,16 +15,18 @@
   {% endfor %}
 </div>
 {% endblock %}
+
 {% block footer %}
 <div class="composer">
   <textarea id="input" rows="1" placeholder="Scrivi al planner…"></textarea>
   <div class="composer-actions">
     <button class="btn" id="send">Invia</button>
     <!-- il tasto VIA E' l'approvazione del piano (§3.2) -->
-    <button class="btn primary" id="via">VIA ▶</button>
+    <button class="btn green" id="via">VIA ▶</button>
   </div>
 </div>
 {% endblock %}
+
 {% block scripts %}
 <script>
   const CID = "{{ conversation['id'] if conversation else '' }}";

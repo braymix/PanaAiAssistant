@@ -1,14 +1,18 @@
 {% extends "base.html" %}
 {% block title %}Argo · piano{% endblock %}
+{% block screen_title %}Approva il piano{% endblock %}
+
 {% block content %}
-<h2>Approva il piano</h2>
-<p class="muted">{{ summary }}</p>
+{% if not plan %}
+<p class="empty">Piano inesistente.</p>
+{% else %}
+<p class="summary">{{ summary or 'è questo che stai approvando: file + task.' }}</p>
 
 <!-- §3.2: mostra i file che verranno toccati: e' QUELLO che stai approvando -->
 <h3>File nel perimetro</h3>
-<ul class="files">
-  {% for f in all_files %}<li><code>{{ f }}</code></li>{% endfor %}
-</ul>
+<div class="file-chips">
+  {% for f in all_files %}<code>{{ f }}</code>{% endfor %}
+</div>
 
 <div id="pending" class="pending" hidden>
   <h3>Approvazioni in attesa</h3>
@@ -22,22 +26,28 @@
   <li data-task="{{ t['id'] }}">
     <div class="t-head">
       <span class="t-title">{{ t['title'] }}</span>
-      <span class="badge" data-status>{{ t['status'] }}</span>
+      <span class="badge b-{{ t['status'] }}" data-status>{{ t['status'] }}</span>
     </div>
-    <div class="t-verify">verify: <code>{{ b.get('verify_cmd', '') }}</code></div>
+    <div class="t-verify">verify: <code>{{ b.get('verify_cmd', '—') }}</code></div>
     <div class="t-files">{{ b.get('files_allowed', [])|join(', ') }}</div>
     {% if b.get('depends_on') %}<div class="t-deps">dopo: {{ b['depends_on']|join(', ') }}</div>{% endif %}
   </li>
   {% endfor %}
 </ol>
+{% endif %}
 {% endblock %}
+
 {% block footer %}
-<div class="actionbar two">
-  <a class="btn ghost wide" href="/chat/{{ plan['conversation_id'] }}">Torna</a>
-  <button class="btn primary wide" id="approve" data-plan="{{ plan['id'] }}">Esegui</button>
+{% if plan %}
+<div class="footer">
+  <a class="btn ghost" href="/chat/{{ plan['conversation_id'] }}">Torna</a>
+  <button class="btn" id="approve" data-plan="{{ plan['id'] }}">Esegui ▶</button>
 </div>
+{% endif %}
 {% endblock %}
+
 {% block scripts %}
+{% if plan %}
 <script>
   const PLAN_ID = "{{ plan['id'] }}";
   document.getElementById('approve').onclick = async function () {
@@ -48,4 +58,5 @@
   // se il piano e' gia' in esecuzione/finito, monitora subito
   if ("{{ plan['status'] }}" !== "draft") Argo.monitorPlan(PLAN_ID);
 </script>
+{% endif %}
 {% endblock %}

@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from pathlib import Path
+
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from ..config import get_settings
@@ -11,6 +15,7 @@ from ..ids import new_id
 from ..security import resolve_within_roots, PathNotAllowed
 
 router = APIRouter(prefix="/projects")
+templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
 
 class NewProject(BaseModel):
@@ -19,8 +24,14 @@ class NewProject(BaseModel):
 
 
 @router.get("")
-async def list_projects():
+async def list_projects(request: Request):
+    """Stessa route per due consumatori (§ handoff): il browser (Accept: text/html)
+    ottiene la pagina Progetti; le fetch di app.js/API ottengono il JSON."""
     rows = get_db().query("SELECT * FROM project ORDER BY created_at DESC")
+    if "text/html" in request.headers.get("accept", ""):
+        return templates.TemplateResponse(request, "projects.html", {
+            "request": request, "projects": rows,
+        })
     return [dict(r) for r in rows]
 
 

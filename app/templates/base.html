@@ -6,18 +6,30 @@
   <meta name="theme-color" content="#0b0f14" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="apple-touch-icon" href="/static/icon-192.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/app.css" />
   <title>{% block title %}Argo{% endblock %}</title>
 </head>
 <body>
+  {% block topbar %}
+  <!-- header interno di default: chevron indietro → home (§ nav) + titolo -->
   <header class="topbar">
-    <a class="back" href="/">Argo</a>
+    <a class="back" href="{% block back_href %}/{% endblock %}" aria-label="Indietro">
+      <svg class="ic" aria-hidden="true"><use href="/static/icons.svg#ic-back" /></svg>
+    </a>
+    <span class="title">{% block screen_title %}Argo{% endblock %}</span>
     {% block header_extra %}{% endblock %}
   </header>
-  <main class="content">
+  {% endblock %}
+
+  <main class="{% block content_class %}content inner{% endblock %}">
     {% block content %}{% endblock %}
   </main>
+
   {% block footer %}{% endblock %}
+
   <script src="/static/app.js"></script>
   {% block scripts %}{% endblock %}
 </body>

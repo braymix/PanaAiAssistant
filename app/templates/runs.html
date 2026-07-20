@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Argo · run{% endblock %}
+{% block screen_title %}Run{% endblock %}
+
+{% block content %}
+<h3>Run recenti</h3>
+<ul class="rows">
+  {% for r in runs %}
+  <li>
+    <a href="/runs/{{ r['id'] }}">
+      <span class="r-icon" style="color:var(--amber)"><svg class="ic" aria-hidden="true"><use href="/static/icons.svg#ic-run" /></svg></span>
+      <span class="r-main">
+        <span class="r-title">{{ r['task_title'] or 'run' }}</span>
+        <span class="r-sub">{{ r['backend'] }}{% if r['model'] %} · {{ r['model'] }}{% endif %}</span>
+      </span>
+      <span class="badge b-{{ r['status'] }}">{{ r['status'] }}</span>
+    </a>
+  </li>
+  {% else %}
+  <li class="empty" style="border:0;background:none">Nessun run.</li>
+  {% endfor %}
+</ul>
+{% endblock %}

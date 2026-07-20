@@ -18,14 +18,58 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templa
 @router.get("/", response_class=HTMLResponse)
 async def dashboard(request: Request):
     db = get_db()
-    convs = db.query("SELECT * FROM conversation ORDER BY created_at DESC LIMIT 20")
-    plans = db.query(
+    # conversazioni + stato dell'ultimo piano collegato (per la chip "recente")
+    convs = db.query(
+        "SELECT c.*, (SELECT p.status FROM plan_document p "
+        " WHERE p.conversation_id=c.id ORDER BY p.created_at DESC LIMIT 1) "
+        " AS last_plan_status "
+        "FROM conversation c ORDER BY c.created_at DESC LIMIT 20")
+    # contatori per i badge delle tile (reali)
+    draft_plans = db.query_one(
+        "SELECT COUNT(*) c FROM plan_document WHERE status='draft'")["c"]
+    active_runs = db.query_one(
+        "SELECT COUNT(*) c FROM run WHERE status='running'")["c"]
+    pending_count = db.query_one(
+        "SELECT COUNT(*) c FROM approval WHERE status='pending'")["c"]
+    return templates.TemplateResponse(request, "dashboard.html", {
+        "request": request, "conversations": convs,
+        "draft_plans": draft_plans, "active_runs": active_runs,
+        "pending_count": pending_count,
+        "user": getattr(request.state, "user", "?"),
+    })
+
+
+@router.get("/plans", response_class=HTMLResponse)
+async def plans_page(request: Request):
+    plans = get_db().query(
         "SELECT p.id, p.status, p.created_at, "
         "(SELECT COUNT(*) FROM task t WHERE t.plan_id=p.id) AS n_tasks "
-        "FROM plan_document p ORDER BY p.created_at DESC LIMIT 10")
-    return templates.TemplateResponse(request, "dashboard.html", {
-        "request": request, "conversations": convs, "plans": plans,
-        "user": getattr(request.state, "user", "?"),
+        "FROM plan_document p ORDER BY p.created_at DESC LIMIT 50")
+    return templates.TemplateResponse(request, "plans.html", {
+        "request": request, "plans": plans,
+    })
+
+
+@router.get("/runs", response_class=HTMLResponse)
+async def runs_page(request: Request):
+    runs = get_db().query(
+        "SELECT r.id, r.backend, r.model, r.status, r.started_at, "
+        "t.title AS task_title FROM run r LEFT JOIN task t ON r.task_id=t.id "
+        "ORDER BY r.started_at DESC, r.id DESC LIMIT 50")
+    return templates.TemplateResponse(request, "runs.html", {
+        "request": request, "runs": runs,
+    })
+
+
+@router.get("/approvals", response_class=HTMLResponse)
+async def approvals_page(request: Request):
+    approvals = get_db().query(
+        "SELECT a.id, a.tool_name, a.pushed_at, t.title AS task_title "
+        "FROM approval a LEFT JOIN run r ON a.run_id=r.id "
+        "LEFT JOIN task t ON r.task_id=t.id "
+        "WHERE a.status='pending' ORDER BY a.pushed_at DESC", ())
+    return templates.TemplateResponse(request, "approvals.html", {
+        "request": request, "approvals": approvals,
     })
 
 

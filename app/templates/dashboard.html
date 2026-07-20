@@ -1,86 +1,137 @@
 {% extends "base.html" %}
-{% block title %}Argo · home{% endblock %}
+{% block title %}Argo · centro servizi IA{% endblock %}
+
+{% block topbar %}
+<header class="brandbar">
+  <div class="brand">
+    <span class="eyebrow">centro servizi IA</span>
+    <span class="wordmark">argo<span class="dot off" id="status-dot"></span><span class="status" id="status-label">offline</span></span>
+  </div>
+  <a class="icon-btn" href="/projects" aria-label="Impostazioni">
+    <svg class="ic" aria-hidden="true"><use href="/static/icons.svg#ic-gear" /></svg>
+  </a>
+</header>
+{% endblock %}
+
+{% block content_class %}content home{% endblock %}
 {% block content %}
 
-<!-- M5: stats live, leggibili in 2 secondi (§4.14) -->
-<section class="stats" id="stats" aria-live="polite">
-  <div class="stat"><span class="k" id="s-active">–</span><span class="l">run attivi</span></div>
-  <div class="stat"><span class="k" id="s-cost">€–</span><span class="l">oggi (stima)</span></div>
-  <div class="stat"><span class="k" id="s-queue">–</span><span class="l">coda Ollama</span></div>
-  <div class="stat"><span class="k" id="s-pending">–</span><span class="l">approv. pend.</span></div>
-  <div class="stat"><span class="k" id="s-done">–</span><span class="l">task done</span></div>
-  <div class="stat"><span class="k" id="s-failed">–</span><span class="l">falliti</span></div>
-  <div class="stat"><span class="k" id="s-esc">–</span><span class="l">escalation</span></div>
-  <div class="stat"><span class="k" id="s-push">–</span><span class="l">push (qualità piano)</span></div>
+<!-- barra stats compatta: valori live da /stats (§4.14) -->
+<section class="statsbar" aria-live="polite">
+  <button class="statseg" onclick="location.href='/runs'">
+    <span class="k" id="s-active">–</span><span class="l">run attivi</span>
+  </button>
+  <div class="statseg">
+    <span class="k" id="s-cost">€–</span><span class="l">oggi</span>
+  </div>
+  <button class="statseg" onclick="location.href='/ollama'">
+    <span class="k" id="s-queue">–</span><span class="l">in coda</span>
+  </button>
+  <button class="statseg warn" onclick="location.href='/approvals'">
+    <span class="k" id="s-pending">–</span><span class="l">da approvare</span>
+  </button>
 </section>
 
-<h2>Progetto</h2>
-<select id="project" class="select"><option value="">— scegli repo —</option></select>
-<details class="add-proj">
-  <summary>+ nuovo progetto</summary>
-  <input id="p-name" class="inp" placeholder="nome" />
-  <input id="p-repo" class="inp" placeholder="repo_path (dentro una root)" />
-  <button class="btn ghost" id="add-project">Aggiungi</button>
-</details>
+<!-- azione n.1: avviare una ricerca (chat in modalità research) -->
+<button class="hero" id="new-research">
+  <span class="chip"><svg class="ic" aria-hidden="true"><use href="/static/icons.svg#ic-search" /></svg></span>
+  <span class="body">
+    <span class="t">Nuova ricerca</span>
+    <span class="s">cerca sul web, verifica le fonti, genera un documento</span>
+  </span>
+  <svg class="go" aria-hidden="true"><use href="/static/icons.svg#ic-chevron" /></svg>
+</button>
 
-<!-- due modi per aprire la chat (= tutto il sistema planner+executor) -->
-<h2>Apri una chat</h2>
-<div class="mode-cards">
-  <button class="mode-card research" id="new-research">
-    <span class="mc-icon">🔎</span>
-    <span class="mc-title">Ricerca online</span>
-    <span class="mc-sub">cerca sul web, verifica le fonti, produce un documento</span>
-  </button>
-  <button class="mode-card generic" id="new-generic">
-    <span class="mc-icon">💬</span>
-    <span class="mc-title">Generica</span>
-    <span class="mc-sub">pianifica ed esegue qualsiasi task di coding/scrittura</span>
-  </button>
-</div>
+<!-- servizi -->
+<section>
+  <div class="recent-head"><span class="section-label">Servizi</span></div>
+  <div class="grid">
+    <button class="tile cat-green" id="new-generic">
+      <span class="ic-chip"><svg class="ic" aria-hidden="true"><use href="/static/icons.svg#ic-chat" /></svg></span>
+      <span class="txt"><span class="t">Chat generica</span><span class="s">pianifica ed esegue qualsiasi task</span></span>
+    </button>
 
-{% if plans %}
-<h2>Piani recenti</h2>
-<ul class="list">
-  {% for p in plans %}
-  <li><a href="/plans/{{ p['id'] }}">{{ p['n_tasks'] }} task
-    <span class="badge b-{{ p['status'] }}">{{ p['status'] }}</span></a></li>
-  {% endfor %}
-</ul>
-{% endif %}
+    <a class="tile cat-violet" href="/plans">
+      {% if draft_plans %}<span class="tile-badge bg-violet">{{ draft_plans }} bozza</span>{% endif %}
+      <span class="ic-chip"><svg class="ic" aria-hidden="true"><use href="/static/icons.svg#ic-plan" /></svg></span>
+      <span class="txt"><span class="t">Piani</span><span class="s">approva ed esegui i task</span></span>
+    </a>
 
-<h2>Conversazioni</h2>
-<ul class="list">
-  {% for c in conversations %}
-  <li class="row" data-conv="{{ c['id'] }}">
-    <a class="row-main" href="/chat/{{ c['id'] }}">
-      {% if c['mode'] == 'research' %}🔎 {% endif %}{{ c['title'] }}</a>
-    <button class="del" title="Elimina" onclick="Argo.deleteChat('{{ c['id'] }}', event)">🗑</button>
-  </li>
-  {% else %}
-  <li class="muted">Nessuna conversazione.</li>
-  {% endfor %}
-</ul>
+    <a class="tile cat-amber" href="/runs">
+      {% if active_runs %}<span class="tile-badge bg-amber">{{ active_runs }} live</span>{% endif %}
+      <span class="ic-chip"><svg class="ic" aria-hidden="true"><use href="/static/icons.svg#ic-run" /></svg></span>
+      <span class="txt"><span class="t">Run attivi</span><span class="s">log live degli executor</span></span>
+    </a>
 
-<div id="live-log" class="log" aria-live="polite"></div>
+    <a class="tile cat-coral" href="/approvals">
+      {% if pending_count %}<span class="tile-badge bg-coral">{{ pending_count }}</span>{% endif %}
+      <span class="ic-chip"><svg class="ic" aria-hidden="true"><use href="/static/icons.svg#ic-shield" /></svg></span>
+      <span class="txt"><span class="t">Approvazioni</span><span class="s">consenti o blocca un tool</span></span>
+    </a>
+
+    <a class="tile cat-teal" href="/ollama">
+      <span class="ic-chip"><svg class="ic" aria-hidden="true"><use href="/static/icons.svg#ic-cpu" /></svg></span>
+      <span class="txt"><span class="t">Log Ollama</span><span class="s">modelli caricati &amp; server</span></span>
+    </a>
+
+    <a class="tile cat-indigo" href="/projects">
+      <span class="ic-chip"><svg class="ic" aria-hidden="true"><use href="/static/icons.svg#ic-folder" /></svg></span>
+      <span class="txt"><span class="t">Progetti</span><span class="s">repo dentro le root</span></span>
+    </a>
+  </div>
+</section>
+
+<!-- attività recente -->
+<section>
+  <div class="recent-head">
+    <span class="section-label">Attività recente</span>
+    <span class="link">vedi tutto</span>
+  </div>
+  <div class="recent">
+    {% for c in conversations %}
+    <a class="recent-row" href="/chat/{{ c['id'] }}">
+      <span class="emoji">{% if c['mode'] == 'research' %}🔎{% else %}💬{% endif %}</span>
+      <span class="rt">{{ c['title'] }}</span>
+      <span class="time">{{ c['created_at'][11:16] if c['created_at'] else '' }}</span>
+      {% set st = c['last_plan_status'] %}
+      {% if st in ('executing', 'running') %}<span class="chip-s chip-run">in corso</span>
+      {% elif st == 'done' %}<span class="chip-s chip-done">done</span>
+      {% elif st in ('failed', 'escalated') %}<span class="chip-s chip-esc">esc</span>{% endif %}
+    </a>
+    {% else %}
+    <div class="empty">Nessuna conversazione.</div>
+    {% endfor %}
+  </div>
+</section>
 
 {% endblock %}
+
 {% block footer %}
-<!-- azioni secondarie in basso (§4.11) -->
-<div class="actionbar">
-  <button class="btn ghost" id="install">Installa PWA</button>
-  <button class="btn ghost" id="enable-push">Push</button>
-  <a class="btn ghost" href="/ollama">Log Ollama</a>
+<!-- una sola azione secondaria (§4.11). "Installa app" rimosso di proposito. -->
+<div class="footer push-only">
+  <button class="btn ghost" id="enable-push">Attiva push</button>
 </div>
 {% endblock %}
+
 {% block scripts %}
 <script>
   Argo.pollStats();
-  Argo.subscribeGlobal((ev) => Argo.appendLog('live-log', ev));
-  Argo.loadProjects();
-  document.getElementById('add-project').onclick = Argo.addProject;
   document.getElementById('new-research').onclick = () => Argo.newChatWithProject('research');
   document.getElementById('new-generic').onclick = () => Argo.newChatWithProject('generic');
   document.getElementById('enable-push').onclick = Argo.enablePush;
-  Argo.wireInstall('install');
+
+  // pallino stato online: derivato dai dati reali (ping /stats)
+  (function () {
+    const dot = document.getElementById('status-dot');
+    const label = document.getElementById('status-label');
+    async function ping() {
+      try {
+        const r = await fetch('/stats', { cache: 'no-store' });
+        const ok = r.ok; dot.classList.toggle('off', !ok);
+        label.textContent = ok ? 'online' : 'offline';
+      } catch (e) { dot.classList.add('off'); label.textContent = 'offline'; }
+    }
+    ping(); setInterval(ping, 4000);
+  })();
 </script>
 {% endblock %}
