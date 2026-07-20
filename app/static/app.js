@@ -150,7 +150,8 @@ const Argo = (() => {
 
   async function newChatWithProject(mode) {
     const sel = document.getElementById('project');
-    const repo = sel ? sel.value : '';
+    // repo attivo: dal vecchio select se presente, altrimenti dalla pagina Progetti
+    const repo = (sel ? sel.value : '') || localStorage.getItem('argo_repo') || '';
     const r = await jpost('/chat/new', { repo_path: repo, mode: mode || 'generic' });
     const q = repo ? ('?repo=' + encodeURIComponent(repo)) : '';
     location.href = '/chat/' + r.conversation_id + q;
@@ -202,21 +203,29 @@ const Argo = (() => {
   async function pollOllamaPs() {
     const el = document.getElementById('ps');
     if (!el) return;
+    const empty = (msg) => { el.classList.add('muted'); el.textContent = msg; };
     async function tick() {
       try {
         const s = await (await fetch('/ollama/ps')).json();
-        if (s.error) { el.textContent = s.error; return; }
+        if (s.error) { empty(s.error); return; }
         const models = s.models || [];
-        if (!models.length) { el.textContent = 'nessun modello caricato ora.'; return; }
+        if (!models.length) { empty('nessun modello caricato ora.'); return; }
+        el.classList.remove('muted');
         el.innerHTML = '';
         models.forEach((m) => {
           const gpu = (m.size_vram && m.size)
             ? Math.round(100 * m.size_vram / m.size) : null;
           const d = document.createElement('div'); d.className = 'ev';
-          d.textContent = m.name + (gpu !== null ? '  ·  ' + gpu + '% GPU' : '');
+          const name = document.createElement('span'); name.textContent = m.name;
+          d.appendChild(name);
+          if (gpu !== null) {
+            const g = document.createElement('span');
+            g.className = 'gpu'; g.textContent = gpu + '% GPU';
+            d.appendChild(g);
+          }
           el.appendChild(d);
         });
-      } catch (e) { el.textContent = 'Ollama non raggiungibile.'; }
+      } catch (e) { empty('Ollama non raggiungibile.'); }
     }
     tick(); setInterval(tick, 3000);
   }

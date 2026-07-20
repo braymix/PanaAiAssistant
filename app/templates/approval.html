@@ -1,10 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Argo · approva{% endblock %}
+{% block screen_title %}Approvare?{% endblock %}
+
 {% block content %}
 {% if not approval %}
-<p class="muted">Approvazione inesistente.</p>
+<p class="empty">Approvazione inesistente.</p>
 {% else %}
-<h2>Approvare?</h2>
+<div class="appr-intro">Un executor vuole eseguire:</div>
 <div class="tool-name">{{ approval['tool_name'] }}</div>
 <div class="approval-status" id="apr-status">stato: {{ approval['status'] }}</div>
 
@@ -12,15 +14,17 @@
 <pre class="rawbox" id="rawbox">{{ tool_input_pretty }}</pre>
 {% endif %}
 {% endblock %}
+
 {% block footer %}
 {% if approval and approval['status'] == 'pending' %}
-<!-- §4.12: Deny sinistra, Allow destra, ≥56px, separati ≥24px, sempre qui -->
-<div class="approve-bar">
+<!-- §4.12: Deny sinistra, Allow destra, ≥58px, separati 24px, sempre qui -->
+<div class="footer approve-bar">
   <button class="btn deny" id="deny" data-id="{{ approval['id'] }}">Deny</button>
   <button class="btn allow" id="allow" data-id="{{ approval['id'] }}">Allow</button>
 </div>
 {% endif %}
 {% endblock %}
+
 {% block scripts %}
 <script>
   {% if approval and approval['status'] == 'pending' %}

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Argo · piani{% endblock %}
+{% block screen_title %}Piani{% endblock %}
+
+{% block content %}
+<h3>Piani recenti</h3>
+<ul class="rows">
+  {% for p in plans %}
+  <li>
+    <a href="/plans/{{ p['id'] }}">
+      <span class="r-icon" style="color:var(--violet)"><svg class="ic" aria-hidden="true"><use href="/static/icons.svg#ic-plan" /></svg></span>
+      <span class="r-main">
+        <span class="r-title">{{ p['n_tasks'] }} task</span>
+        <span class="r-sub">{{ p['created_at'][:16].replace('T', ' ') if p['created_at'] else '' }}</span>
+      </span>
+      <span class="badge b-{{ p['status'] }}">{{ p['status'] }}</span>
+    </a>
+  </li>
+  {% else %}
+  <li class="empty" style="border:0;background:none">Nessun piano.</li>
+  {% endfor %}
+</ul>
+{% endblock %}

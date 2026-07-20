@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Argo · approvazioni{% endblock %}
+{% block screen_title %}Approvazioni{% endblock %}
+
+{% block content %}
+<h3>In attesa</h3>
+<ul class="rows">
+  {% for a in approvals %}
+  <li>
+    <a href="/approvals/{{ a['id'] }}">
+      <span class="r-icon" style="color:var(--coral)"><svg class="ic" aria-hidden="true"><use href="/static/icons.svg#ic-shield" /></svg></span>
+      <span class="r-main">
+        <span class="r-title">{{ a['tool_name'] }}</span>
+        <span class="r-sub">{{ a['task_title'] or '' }}</span>
+      </span>
+      <span class="badge b-esc">pending</span>
+    </a>
+  </li>
+  {% else %}
+  <li class="empty" style="border:0;background:none">Nessuna approvazione in attesa.</li>
+  {% endfor %}
+</ul>
+{% endblock %}

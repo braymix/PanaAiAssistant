@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Argo · progetti{% endblock %}
+{% block screen_title %}Progetti{% endblock %}
+
+{% block content %}
+<h3>Repo disponibili</h3>
+<div class="repos" id="repos">
+  {% for p in projects %}
+  <button type="button" class="repo-row" data-repo="{{ p['repo_path'] }}">
+    <span class="radio"></span>
+    <span class="rinfo">
+      <span class="rname">{{ p['name'] }}</span>
+      <span class="rpath">{{ p['repo_path'] }}</span>
+    </span>
+  </button>
+  {% else %}
+  <div class="empty">Nessun repo. Aggiungine uno qui sotto.</div>
+  {% endfor %}
+</div>
+
+<h3>Nuovo progetto</h3>
+<div class="form-col">
+  <input id="p-name" class="inp" placeholder="nome" />
+  <input id="p-repo" class="inp" placeholder="repo_path (dentro una root)" />
+  <button class="btn ghost" id="add-project">Aggiungi repo</button>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.getElementById('add-project').onclick = Argo.addProject;
+
+  // selezione repo attivo: persiste in localStorage, usato dalle nuove chat.
+  (function () {
+    const rows = [...document.querySelectorAll('.repo-row')];
+    const current = localStorage.getItem('argo_repo') || '';
+    const mark = (repo) => rows.forEach((r) =>
+      r.classList.toggle('sel', r.dataset.repo === repo));
+    mark(current);
+    rows.forEach((r) => r.onclick = () => {
+      localStorage.setItem('argo_repo', r.dataset.repo);
+      mark(r.dataset.repo);
+    });
+  })();
+</script>
+{% endblock %}
