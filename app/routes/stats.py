@@ -14,4 +14,5 @@ router = APIRouter(prefix="/stats")
 async def stats():
     pool = get_pool()
     return snapshot(pushes_sent=pool.pushes.get("pushes", 0),
-                    ollama_queue=pool.queue_depth)
+                    ollama_queue=pool.queue_depth,
+                    scheduler=pool.scheduler)

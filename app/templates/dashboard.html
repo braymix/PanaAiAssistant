@@ -108,7 +108,8 @@
 
 {% block footer %}
 <!-- una sola azione secondaria (§4.11). "Installa app" rimosso di proposito. -->
-<div class="footer push-only">
+<div class="footer">
+  <button class="btn ghost" id="queue-pause" data-paused="0">⏸ Pausa coda</button>
   <button class="btn ghost" id="enable-push">Attiva push</button>
 </div>
 {% endblock %}
@@ -119,6 +120,7 @@
   document.getElementById('new-research').onclick = () => Argo.newChatWithProject('research');
   document.getElementById('new-generic').onclick = () => Argo.newChatWithProject('generic');
   document.getElementById('enable-push').onclick = Argo.enablePush;
+  Argo.wireQueuePause('queue-pause');   // toggle globale pausa coda (§B.5)
 
   // pallino stato online: derivato dai dati reali (ping /stats)
   (function () {

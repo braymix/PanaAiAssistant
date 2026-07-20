@@ -31,9 +31,24 @@
     <div class="t-verify">verify: <code>{{ b.get('verify_cmd', '—') }}</code></div>
     <div class="t-files">{{ b.get('files_allowed', [])|join(', ') }}</div>
     {% if b.get('depends_on') %}<div class="t-deps">dopo: {{ b['depends_on']|join(', ') }}</div>{% endif %}
+    <div class="t-actions">
+      <button class="mini" onclick="Argo.taskAction('cancel', '{{ t['id'] }}')">Annulla</button>
+      <button class="mini" onclick="Argo.taskAction('block', '{{ t['id'] }}')">Blocca</button>
+      <button class="mini" onclick="Argo.taskAction('unblock', '{{ t['id'] }}')">Sblocca</button>
+    </div>
   </li>
   {% endfor %}
 </ol>
+
+<!-- ciclo di vita (§B.5): annulla in corso, elimina (soft), danger zone -->
+<section class="danger-zone">
+  <div class="section-label">Gestione piano</div>
+  <div class="dz-row">
+    <button class="btn ghost" onclick="Argo.planDanger('cancel', '{{ plan['id'] }}')">Annulla esecuzione</button>
+    <button class="btn ghost" onclick="Argo.planDanger('delete', '{{ plan['id'] }}')">Elimina</button>
+  </div>
+  <button class="btn danger" onclick="Argo.planDanger('purge', '{{ plan['id'] }}')">Elimina definitivamente</button>
+</section>
 {% endif %}
 {% endblock %}
 

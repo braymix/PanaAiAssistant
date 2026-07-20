@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -10,6 +11,111 @@ from pathlib import Path
 def _env_list(name: str, default: str = "") -> list[str]:
     raw = os.environ.get(name, default)
     return [p.strip() for p in raw.split(os.pathsep) if p.strip()]
+
+
+# --- settorializzazione LLM: registro dei tier di modello (§A.2) ----------------
+@dataclass
+class ModelTier:
+    """Un livello del routing per peso. `backend='ollama'` -> modello locale;
+    `backend='subscription'` -> Claude (est_vram_mb=0, non consuma GPU)."""
+    name: str                # "light" | "mid" | "heavy" | "frontier"
+    backend: str             # "ollama" | "subscription"
+    model: str               # es. "qwen2.5-coder:7b" | "" (default SDK)
+    est_vram_mb: int         # 0 per subscription
+    rel_speed: int           # 1 (lento) .. 5 (veloce)
+    quality: int             # 1 .. 5
+
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name, "backend": self.backend, "model": self.model,
+            "est_vram_mb": self.est_vram_mb, "rel_speed": self.rel_speed,
+            "quality": self.quality,
+        }
+
+    @staticmethod
+    def from_dict(d: dict) -> "ModelTier":
+        return ModelTier(
+            name=d["name"], backend=d.get("backend", "ollama"),
+            model=d.get("model", ""),
+            est_vram_mb=int(d.get("est_vram_mb", 0) or 0),
+            rel_speed=int(d.get("rel_speed", 3) or 3),
+            quality=int(d.get("quality", 3) or 3),
+        )
+
+
+# Ordine canonico dei tier (dal piu' leggero al piu' pesante). Il router lo usa
+# per l'escalation (`next_tier`) e per il declassamento in VRAM.
+TIER_ORDER = ["light", "mid", "heavy", "frontier"]
+
+
+def default_model_tiers() -> list[ModelTier]:
+    """Template di default, tarato sul PROFILO HARDWARE (RTX 3080 Ti 12GB, il PC
+    dell'utente — cfr. storia del repo). SOSTITUIBILE via ARGO_MODEL_TIERS (JSON).
+
+    Le stime VRAM sono conservative (peso a runtime del modello quantizzato + KV
+    cache); il router lascia sempre un headroom (ARGO_VRAM_HEADROOM_MB)."""
+    return [
+        ModelTier("light", "ollama", "qwen2.5-coder:7b",
+                  est_vram_mb=6000, rel_speed=5, quality=2),
+        ModelTier("mid", "ollama", os.environ.get("ARGO_OLLAMA_MODEL", "qwen3-coder"),
+                  est_vram_mb=9000, rel_speed=3, quality=3),
+        ModelTier("heavy", "ollama", "qwen2.5-coder:14b",
+                  est_vram_mb=11000, rel_speed=2, quality=4),
+        ModelTier("frontier", "subscription", "",
+                  est_vram_mb=0, rel_speed=4, quality=5),
+    ]
+
+
+def _load_model_tiers() -> list[ModelTier]:
+    raw = os.environ.get("ARGO_MODEL_TIERS", "").strip()
+    if not raw:
+        return default_model_tiers()
+    try:
+        data = json.loads(raw)
+        tiers = [ModelTier.from_dict(t) for t in data]
+        return tiers or default_model_tiers()
+    except (ValueError, TypeError, KeyError):
+        return default_model_tiers()
+
+
+# --- politica di pazienza (§A.4) ------------------------------------------------
+@dataclass
+class PatiencePolicy:
+    # per classe di complessita': quanto aspetto in locale prima di salire di tier
+    latency_budget_s: dict[str, int]     # {"light":120,"mid":600,"heavy":1800}
+    cost_preference: str                 # "prefer_local" | "balanced" | "prefer_speed"
+    local_rounds: dict[str, int]         # round di autofix locali prima di escalation
+    preset: str = "balanced"             # "patient" | "balanced" | "fast"
+
+
+# Preset globale via ARGO_PATIENCE, espanso in una tabella (§A.4).
+_PATIENCE_PRESETS: dict[str, PatiencePolicy] = {
+    "patient": PatiencePolicy(
+        latency_budget_s={"light": 300, "mid": 1200, "heavy": 3600},
+        cost_preference="prefer_local",
+        local_rounds={"light": 3, "mid": 4, "heavy": 5},
+        preset="patient",
+    ),
+    "balanced": PatiencePolicy(
+        latency_budget_s={"light": 120, "mid": 600, "heavy": 1800},
+        cost_preference="balanced",
+        local_rounds={"light": 2, "mid": 3, "heavy": 3},
+        preset="balanced",
+    ),
+    "fast": PatiencePolicy(
+        latency_budget_s={"light": 60, "mid": 240, "heavy": 600},
+        cost_preference="prefer_speed",
+        local_rounds={"light": 1, "mid": 1, "heavy": 2},
+        preset="fast",
+    ),
+}
+
+
+def patience_policy(preset: str | None) -> PatiencePolicy:
+    """Espande un preset (patient/balanced/fast) nella sua PatiencePolicy.
+    Preset sconosciuto/None -> 'balanced' (default sicuro)."""
+    key = (preset or "balanced").strip().lower()
+    return _PATIENCE_PRESETS.get(key, _PATIENCE_PRESETS["balanced"])
 
 
 @dataclass
@@ -55,6 +161,17 @@ class Settings:
 
     # backend abbonamento (planner + escalation)
     subscription_model: str = os.environ.get("ARGO_SUB_MODEL", "")  # "" = default SDK
+
+    # --- settorializzazione LLM: routing per peso (missione settorializzazione) --
+    # registro dei tier caricato da ARGO_MODEL_TIERS (JSON) o dal template default.
+    model_tiers: list[ModelTier] = field(default_factory=_load_model_tiers)
+    # preset globale di pazienza: patient | balanced | fast (override per-conv/task).
+    patience: str = os.environ.get("ARGO_PATIENCE", "balanced")
+    # margine di VRAM da lasciare libero per lo scheduler VRAM-aware (§A.6).
+    vram_headroom_mb: int = int(os.environ.get("ARGO_VRAM_HEADROOM_MB", "1024"))
+    # cap separato per i task 'frontier' (subscription): non consumano VRAM ma non
+    # devono floodare l'API (§A.6).
+    sub_concurrency: int = int(os.environ.get("ARGO_SUB_CONCURRENCY", "2"))
 
     # --- autofix loop feedback-driven (missione autofix) ------------------------
     # numero di tentativi PER TIER locale (include il tentativo iniziale). Deve

@@ -20,7 +20,12 @@ CREATE TABLE IF NOT EXISTS project(
 
 CREATE TABLE IF NOT EXISTS conversation(
   id TEXT PRIMARY KEY, title TEXT, plan_mode INTEGER, created_at TEXT,
-  mode TEXT DEFAULT 'generic'      -- 'generic' | 'research'
+  mode TEXT DEFAULT 'generic',     -- 'generic' | 'research'
+  deleted_at TEXT                  -- soft-delete (ciclo di vita §B.3)
+);
+
+CREATE TABLE IF NOT EXISTS app_state(
+  key TEXT PRIMARY KEY, value TEXT  -- flag globali persistiti (es. queue paused)
 );
 
 CREATE TABLE IF NOT EXISTS message(
@@ -30,14 +35,16 @@ CREATE TABLE IF NOT EXISTS message(
 
 CREATE TABLE IF NOT EXISTS plan_document(
   id TEXT PRIMARY KEY, conversation_id TEXT, status TEXT, raw_json TEXT,
-  cost_usd REAL, approved_at TEXT, created_at TEXT
+  cost_usd REAL, approved_at TEXT, created_at TEXT,
+  deleted_at TEXT                  -- soft-delete (ciclo di vita §B.3)
 );
 
 CREATE TABLE IF NOT EXISTS task(
   id TEXT PRIMARY KEY, plan_id TEXT, seq INTEGER, title TEXT,
   brief_json TEXT, status TEXT, backend TEXT,
   attempts INTEGER DEFAULT 0, verify_output TEXT, depends_on TEXT,
-  autofix_round INTEGER DEFAULT 0, failure_class TEXT
+  autofix_round INTEGER DEFAULT 0, failure_class TEXT, tier TEXT,
+  deleted_at TEXT                  -- soft-delete (ciclo di vita §B.3)
 );
 
 CREATE TABLE IF NOT EXISTS run(
@@ -108,6 +115,15 @@ class Database:
                 "ALTER TABLE task ADD COLUMN autofix_round INTEGER DEFAULT 0")
         if "failure_class" not in task_cols:
             self.execute("ALTER TABLE task ADD COLUMN failure_class TEXT")
+        # --- settorializzazione (routing per peso): tier scelto dal router.
+        if "tier" not in task_cols:
+            self.execute("ALTER TABLE task ADD COLUMN tier TEXT")
+
+        # --- ciclo di vita (§B): soft-delete su conversation/plan/task ----------
+        for table in ("conversation", "plan_document", "task"):
+            cols = [r["name"] for r in self.query(f"PRAGMA table_info({table})")]
+            if "deleted_at" not in cols:
+                self.execute(f"ALTER TABLE {table} ADD COLUMN deleted_at TEXT")
 
         run_cols = [r["name"] for r in self.query("PRAGMA table_info(run)")]
         if "attempt" not in run_cols:
@@ -138,6 +154,18 @@ class Database:
     def query_one(self, sql: str, params: Iterable[Any] = ()) -> sqlite3.Row | None:
         rows = self.query(sql, params)
         return rows[0] if rows else None
+
+    # --- app_state: flag globali persistiti (ciclo di vita §B.1) ---------------
+    def get_state(self, key: str, default: str | None = None) -> str | None:
+        row = self.query_one("SELECT value FROM app_state WHERE key=?", (key,))
+        return row["value"] if row else default
+
+    def set_state(self, key: str, value: str) -> None:
+        self.execute(
+            "INSERT INTO app_state(key, value) VALUES(?,?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            (key, value),
+        )
 
     # --- event: SOLO append (regola 4.4) ---------------------------------------
     def append_event(self, run_id: str | None, kind: str, payload: Any) -> int:

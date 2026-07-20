@@ -15,6 +15,15 @@ class PlanValidationError(ValueError):
     pass
 
 
+def _norm_enum(value: Any, allowed: tuple[str, ...]) -> str | None:
+    """Normalizza un campo enum opzionale: valori fuori dominio -> None (il codice
+    decide comunque via router). Retro-compatibile: assente/None -> None."""
+    if value is None:
+        return None
+    v = str(value).strip().lower()
+    return v if v in allowed else None
+
+
 @dataclass
 class TaskBrief:
     id: str
@@ -28,6 +37,11 @@ class TaskBrief:
     depends_on: list[str] = field(default_factory=list)
     max_turns: int = 25
     timeout_s: int = 900
+    # --- settorializzazione (§A.3): il planner PROPONE, il codice DECIDE. Campi
+    #     opzionali e retro-compatibili: i piani vecchi (senza) instradano comunque.
+    complexity: str | None = None          # "light" | "mid" | "heavy" | None
+    criticality: str = "normal"            # "low" | "normal" | "high"
+    latency_tolerance: str | None = None   # "patient" | "normal" | "impatient" | None
 
     @staticmethod
     def from_dict(d: dict[str, Any]) -> "TaskBrief":
@@ -46,6 +60,11 @@ class TaskBrief:
             depends_on=list(d.get("depends_on") or []),
             max_turns=int(d.get("max_turns", 25)),
             timeout_s=int(d.get("timeout_s", 900)),
+            complexity=_norm_enum(d.get("complexity"), ("light", "mid", "heavy")),
+            criticality=_norm_enum(
+                d.get("criticality"), ("low", "normal", "high")) or "normal",
+            latency_tolerance=_norm_enum(
+                d.get("latency_tolerance"), ("patient", "normal", "impatient")),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -55,6 +74,8 @@ class TaskBrief:
             "acceptance": self.acceptance, "verify_cmd": self.verify_cmd,
             "verify_cwd": self.verify_cwd, "depends_on": self.depends_on,
             "max_turns": self.max_turns, "timeout_s": self.timeout_s,
+            "complexity": self.complexity, "criticality": self.criticality,
+            "latency_tolerance": self.latency_tolerance,
         }
 
 
