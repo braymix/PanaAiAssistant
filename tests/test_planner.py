@@ -170,3 +170,62 @@ def test_planner_session_persisted_and_resumed(db):
         assert seen_resume[1] == "sess-1"
     finally:
         set_client_cls(None)  # ripristina l'import pigro dell'SDK
+
+
+class _StaleResumeClient:
+    """Simula una sessione non piu' esistente: se options.resume e' valorizzato
+    l'avvio del CLI fallisce (come 'No conversation found with session ID');
+    senza resume, invece, riparte pulito."""
+    attempts: list = []
+
+    def __init__(self, options=None):
+        self.resume = getattr(options, "resume", None)
+        _StaleResumeClient.attempts.append(self.resume)
+        self._sid = "sess-fresh"
+
+    async def __aenter__(self):
+        if self.resume:
+            from claude_agent_sdk import ProcessError
+            raise ProcessError("Command failed", exit_code=1,
+                               stderr="No conversation found with session ID: x")
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def query(self, prompt):
+        self.prompt = prompt
+
+    async def receive_response(self):
+        yield _Init(self._sid)
+        yield AssistantMessage([TextBlock("ripartito da zero")])
+
+
+def test_chat_stream_recovers_from_stale_resume(db):
+    """Se la sessione da riprendere non esiste piu', il turno riparte senza
+    resume invece di crashare (500)."""
+    _StaleResumeClient.attempts.clear()
+    set_client_cls(_StaleResumeClient)
+    try:
+        cid = new_id("conv")
+        db.execute(
+            "INSERT INTO conversation(id, title, plan_mode, created_at) VALUES(?,?,?,?)",
+            (cid, "t", 1, utcnow()))
+        # semina una sessione precedente (stantia) che verra' tentata come resume
+        db.execute(
+            "INSERT INTO run(id, task_id, conversation_id, session_id, backend, "
+            "model, status, cost_usd, started_at, ended_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (new_id("run"), None, cid, "stale-sess", "subscription", "default",
+             "done", 0.0, utcnow(), utcnow()))
+
+        asyncio.run(chat_stream(cid, ".", "ciao"))
+        # primo tentativo col resume stantio, secondo senza (fallback)
+        assert _StaleResumeClient.attempts == ["stale-sess", None]
+        # la risposta del turno pulito e' stata persistita
+        msg = db.query_one(
+            "SELECT content FROM message WHERE conversation_id=? AND role='assistant'",
+            (cid,))
+        assert msg["content"] == "ripartito da zero"
+    finally:
+        set_client_cls(None)

@@ -29,6 +29,12 @@ async def via(body: ViaRequest):
             body.conversation_id, body.repo_path, body.resume_session)
     except PlanValidationError as e:
         raise HTTPException(status_code=422, detail=f"Piano rifiutato: {e}")
+    except Exception as e:  # noqa: BLE001 — mostrare un errore leggibile, non un 500 grezzo
+        # es. CLI `claude` non installata/loggata, o il planner e' crashato: il
+        # frontend mostra `detail`, quindi diamo un messaggio azionabile.
+        raise HTTPException(
+            status_code=502,
+            detail=f"Il planner non e' riuscito a generare il piano: {e}")
     return {"plan_id": plan_id, "next": f"/plans/{plan_id}"}
 
 
