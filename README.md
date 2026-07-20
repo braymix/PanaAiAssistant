@@ -62,11 +62,33 @@ app/
   planner.py     chat plan mode + tasto VIA → PlanDocument (M3)
   executor.py    pool, depends_on, verify_cmd, retry, escalation (M4)
   stats.py       snapshot live (M5)
-  routes/        health, chat, plans, runs(SSE), approvals, push, stats, ui
+  system.py      comandi di sistema: riavvia/spegni app, spegni PC, reset totale
+  routes/        health, chat, plans, runs(SSE), approvals, push, stats, ui, system
   templates/ static/   PWA mobile-first, dark, standalone
 tests/           28 test: path, schema, replay, policy, plan, M2-shadow, http
 gates/           harness GATE 0/1/2 (da eseguire sul PC/telefono)
 ```
+
+## Comandi di sistema (dal telefono)
+
+In fondo alla home c'è la zona **Sistema**. Ogni azione è distruttiva e chiede
+conferma (le OS due volte); ognuna emette un evento SSE prima di agire.
+
+| Azione | Endpoint | Effetto |
+| --- | --- | --- |
+| 🔄 Riavvia app | `POST /system/app/restart` | rilancia il processo (rilancio staccato che aspetta la morte del vecchio) |
+| ⏹ Spegni app | `POST /system/app/shutdown` | ferma il processo (poi va riavviato dal PC / Task Scheduler) |
+| ⏻ Spegni PC | `POST /system/pc/shutdown` | `shutdown` a livello OS |
+| ♻ Riavvia servizi | `POST /system/services/restart` | riavvio a caldo del pool executor + broker (non tocca il processo) |
+| 🧹 Pulizia totale DB | `POST /system/reset` | svuota il DB (chat/piani/task/run/eventi) **e** riavvia i servizi |
+
+Le tre azioni OS/processo sono dietro `ARGO_SYSTEM_CONTROLS` (default `1`); il
+reset DB no. Il reset preserva di default l'iscrizione push e i progetti
+(`keep_push` / `keep_projects`). Rilancio e spegnimento sono configurabili con
+`ARGO_RESTART_CMD` / `ARGO_POWEROFF_CMD` (vedi `.env.example`). Come i GATE,
+questi effetti (riavvio reale, spegnimento) si verificano **sul PC**, non in cloud.
+
+Le chat si **rinominano** dal ✎ nella lista in home (`PATCH /chat/{id}`).
 
 ## Test
 

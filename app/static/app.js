@@ -32,7 +32,9 @@ const Argo = (() => {
      'route_decision', 'config_warning', 'task_cancelled', 'plan_cancelled',
      'queue_paused', 'queue_resumed', 'task_blocked', 'task_unblocked',
      'conversation_deleted', 'plan_deleted', 'task_deleted', 'run_deleted',
-     'conversation_purged', 'plan_purged']
+     'conversation_purged', 'plan_purged', 'conversation_renamed',
+     'system_app_restart', 'system_app_shutdown', 'system_pc_shutdown',
+     'system_services_restarted', 'system_reset']
       .forEach((k) => es.addEventListener(k, (e) => onEvent({ kind: k, data: e.data })));
     return es;
   }
@@ -349,6 +351,55 @@ const Argo = (() => {
     } catch (e) { alert(e.message); }
   }
 
+  // rinomina il titolo di una chat (dalla lista in home). Legge il titolo
+  // corrente dal DOM per evitare problemi di escaping negli attributi.
+  async function renameChat(id, ev) {
+    if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+    const el = document.querySelector('[data-conv="' + id + '"] .rt');
+    const current = el ? el.textContent.trim() : '';
+    const title = prompt('Nuovo titolo della chat:', current);
+    if (title === null) return;
+    const t = title.trim();
+    if (!t) return;
+    try {
+      const r = await fetch('/chat/' + id, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: t }),
+      });
+      if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+      if (el) el.textContent = t;
+    } catch (e) { alert(e.message); }
+  }
+
+  // --- comandi di sistema (§ sistema): azioni distruttive, doppia conferma ---
+  async function systemAction(action) {
+    const MSG = {
+      'app/restart': 'Riavviare l\'app? Il servizio si ferma e riparte da solo.',
+      'app/shutdown': 'Spegnere l\'app? Il servizio si ferma (poi va riavviato dal PC).',
+      'pc/shutdown': 'SPEGNERE IL PC? Tutto si spegne.',
+      'services/restart': 'Riavviare i servizi interni? Annulla il lavoro in corso.',
+    };
+    if (!confirm(MSG[action] || 'Confermi?')) return;
+    if (action === 'pc/shutdown' && !confirm('Ultima conferma: spengo il PC?')) return;
+    try {
+      const r = await jpost('/system/' + action, { confirm: true });
+      alert('OK: ' + (r.status || 'fatto'));
+    } catch (e) { alert('Errore: ' + e.message); }
+  }
+
+  async function systemReset() {
+    if (!confirm('PULIZIA TOTALE del DB + riavvio dei servizi.\n'
+                 + 'Elimina chat, piani, task, run ed eventi. Irreversibile.')) return;
+    if (!confirm('Ultima conferma: procedo con la pulizia totale?')) return;
+    try {
+      const r = await jpost('/system/reset', { confirm: true });
+      const rm = r.removed || {};
+      const n = Object.values(rm).reduce((a, b) => a + b, 0);
+      alert('Reset completato: ' + n + ' righe rimosse. Servizi riavviati.');
+      location.href = '/';
+    } catch (e) { alert('Errore: ' + e.message); }
+  }
+
   // --- approvazione (M2) ---
   async function decide(id, allow) {
     try {
@@ -400,7 +451,8 @@ const Argo = (() => {
   return { pollStats, subscribeGlobal, appendLog, wireChat, approvePlan,
            monitorPlan, streamRun, newChat, decide, wireInstall, enablePush,
            loadProjects, addProject, newChatWithProject,
-           streamOllamaLogs, pollOllamaPs, deleteChat,
+           streamOllamaLogs, pollOllamaPs, deleteChat, renameChat,
+           systemAction, systemReset,
            cancelPlan, cancelTask, blockTask, unblockTask,
            softDeletePlan, softDeleteConversation, purgePlan, purgeConversation,
            pauseQueue, resumeQueue, wireQueuePause, taskAction, planDanger,

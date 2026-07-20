@@ -102,12 +102,30 @@
       {% if st in ('executing', 'running') %}<span class="chip-s chip-run">in corso</span>
       {% elif st == 'done' %}<span class="chip-s chip-done">done</span>
       {% elif st in ('failed', 'escalated') %}<span class="chip-s chip-esc">esc</span>{% endif %}
+      <button class="row-del" aria-label="Rinomina chat"
+              onclick="Argo.renameChat('{{ c['id'] }}', event)">✎</button>
       <button class="row-del" aria-label="Elimina chat"
               onclick="Argo.deleteChat('{{ c['id'] }}', event)">🗑</button>
     </a>
     {% else %}
     <div class="empty">Nessuna conversazione.</div>
     {% endfor %}
+  </div>
+</section>
+
+<!-- comandi di sistema: azioni distruttive, doppia conferma (§ sistema) -->
+<section class="danger-zone" aria-label="Comandi di sistema">
+  <div class="section-label">Sistema</div>
+  <div class="dz-row">
+    <button class="btn danger" onclick="Argo.systemAction('app/restart')">🔄 Riavvia app</button>
+    <button class="btn danger" onclick="Argo.systemAction('app/shutdown')">⏹ Spegni app</button>
+  </div>
+  <div class="dz-row">
+    <button class="btn danger" onclick="Argo.systemAction('services/restart')">♻ Riavvia servizi</button>
+    <button class="btn danger" onclick="Argo.systemReset()">🧹 Pulizia totale DB</button>
+  </div>
+  <div class="dz-row">
+    <button class="btn danger" onclick="Argo.systemAction('pc/shutdown')">⏻ Spegni PC</button>
   </div>
 </section>
 
