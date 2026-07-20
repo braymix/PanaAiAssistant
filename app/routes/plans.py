@@ -40,10 +40,11 @@ async def plan_status(plan_id: str):
     if not plan:
         raise HTTPException(status_code=404, detail="piano inesistente")
     tasks = db.query(
-        "SELECT t.id, t.title, t.status, t.attempts, t.backend, "
+        "SELECT t.id, t.title, t.status, t.attempts, t.backend, t.tier, "
         "(SELECT r.id FROM run r WHERE r.task_id=t.id "
         " ORDER BY r.started_at DESC, r.id DESC LIMIT 1) AS run_id "
-        "FROM task t WHERE t.plan_id=? ORDER BY t.seq", (plan_id,))
+        "FROM task t WHERE t.plan_id=? AND t.deleted_at IS NULL "
+        "ORDER BY t.seq", (plan_id,))
     # approvazioni pendenti per i run dei task di questo piano
     pending = db.query(
         "SELECT a.id, a.tool_name, t.title AS task_title FROM approval a "

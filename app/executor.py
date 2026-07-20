@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import signal
 import subprocess
 from pathlib import Path
 
@@ -49,6 +51,11 @@ class ExecutorPool:
         self._scheduler: VramScheduler | None = None
         self._profile_cache = None
         self._config_warned = False
+        # --- ciclo di vita (§B.2): registro dei task vivi per annullarli --------
+        self._plan_tasks: dict[str, list[asyncio.Task]] = {}
+        self._task_coros: dict[str, asyncio.Task] = {}
+        self._verify_procs: dict[str, subprocess.Popen] = {}
+        self._paused_restored = False
 
     def _get_client_cls(self):
         if self._client_cls is None:
@@ -125,47 +132,200 @@ class ExecutorPool:
         for r in task_rows:
             self._done_events[r["id"]] = asyncio.Event()
 
-        self.queue_depth = len(task_rows)
-        coros = [
-            self._run_with_deps(r, briefs[r["id"]], repo_resolved, roots,
-                                brief_id_to_dbid)
-            for r in task_rows
-        ]
-        await asyncio.gather(*coros)
+        # ripristina lo stato di pausa persistito PRIMA di ammettere task (§B.2).
+        await self._restore_paused_once()
 
-        # stato finale del piano
+        self.queue_depth = len(task_rows)
+        # ciclo di vita (§B.2): ogni task e' un asyncio.Task REGISTRATO, cosi' e'
+        # annullabile singolarmente; il piano tiene la lista per cancel_plan.
+        tasks: list[asyncio.Task] = []
+        for r in task_rows:
+            t = asyncio.ensure_future(
+                self._run_with_deps(r, briefs[r["id"]], repo_resolved, roots,
+                                    brief_id_to_dbid))
+            self._task_coros[r["id"]] = t
+            tasks.append(t)
+        self._plan_tasks[plan_id] = tasks
+        try:
+            # return_exceptions: un annullamento (CancelledError) di un task NON
+            # deve far esplodere l'intero gather e lasciare gli altri appesi.
+            await asyncio.gather(*tasks, return_exceptions=True)
+        finally:
+            self._plan_tasks.pop(plan_id, None)
+            for r in task_rows:
+                self._task_coros.pop(r["id"], None)
+
+        # stato finale del piano. Se e' stato annullato, resta 'cancelled'.
+        plan_now = db.query_one(
+            "SELECT status FROM plan_document WHERE id=?", (plan_id,))
+        if plan_now and plan_now["status"] == "cancelled":
+            await bus.emit(None, "plan_done",
+                           {"plan_id": plan_id, "status": "cancelled"})
+            return
         remaining = db.query(
             "SELECT status FROM task WHERE plan_id=?", (plan_id,))
         statuses = [x["status"] for x in remaining]
-        final = "done" if all(s == "done" for s in statuses) else "failed"
+        if any(s == "cancelled" for s in statuses):
+            final = "cancelled"
+        elif all(s == "done" for s in statuses):
+            final = "done"
+        else:
+            final = "failed"
         db.execute("UPDATE plan_document SET status=? WHERE id=?", (final, plan_id))
         await bus.emit(None, "plan_done", {"plan_id": plan_id, "status": final})
 
     async def _run_with_deps(self, task_row, brief: TaskBrief, repo: Path,
                              roots, brief_id_to_dbid) -> None:
         db = get_db()
-        # attende le dipendenze
-        for dep_brief_id in brief.depends_on:
-            dep_dbid = brief_id_to_dbid.get(dep_brief_id)
-            if dep_dbid and dep_dbid in self._done_events:
-                await self._done_events[dep_dbid].wait()
-                if not self._task_ok.get(dep_dbid, False):
-                    # dipendenza fallita: questo task non parte
-                    db.execute(
-                        "UPDATE task SET status='failed', verify_output=? WHERE id=?",
-                        (f"dipendenza {dep_brief_id} fallita", task_row["id"]),
-                    )
-                    self._task_ok[task_row["id"]] = False
-                    self._done_events[task_row["id"]].set()
-                    self.queue_depth -= 1
-                    return
+        bus = get_bus()
+        task_id = task_row["id"]
+        try:
+            # veto pre-esecuzione (§B.1): un task 'blocked' non viene preso in carico.
+            if self._db_status(task_id) == "blocked":
+                await bus.emit(None, "task_blocked_skip", {"task_id": task_id})
+                self._finish(task_id, ok=False)
+                return
 
-        # NB: l'ammissione (scheduler VRAM-aware, §A.6) e' ora DENTRO _execute_task,
-        # per-tier: il peso dipende dalla RouteDecision del tier corrente.
-        ok = await self._execute_task(task_row, brief, repo, roots)
-        self._task_ok[task_row["id"]] = ok
-        self._done_events[task_row["id"]].set()
-        self.queue_depth -= 1
+            # attende le dipendenze
+            for dep_brief_id in brief.depends_on:
+                dep_dbid = brief_id_to_dbid.get(dep_brief_id)
+                if dep_dbid and dep_dbid in self._done_events:
+                    await self._done_events[dep_dbid].wait()
+                    if not self._task_ok.get(dep_dbid, False):
+                        # INVARIANTE §B.6.2: i dipendenti di un task
+                        # cancelled/failed/blocked NON partono. Erediti lo stato:
+                        # 'cancelled' se la dipendenza e' stata annullata/bloccata.
+                        dep_status = self._db_status(dep_dbid)
+                        inherit = ("cancelled"
+                                   if dep_status in ("cancelled", "blocked")
+                                   else "failed")
+                        db.execute(
+                            "UPDATE task SET status=?, verify_output=? WHERE id=?",
+                            (inherit,
+                             f"dipendenza {dep_brief_id} non riuscita ({dep_status})",
+                             task_id),
+                        )
+                        self._finish(task_id, ok=False)
+                        return
+
+            # ri-controlla il veto DOPO le dipendenze (potrebbe essere stato
+            # bloccato mentre attendeva): sempre pre-esecuzione.
+            if self._db_status(task_id) == "blocked":
+                await bus.emit(None, "task_blocked_skip", {"task_id": task_id})
+                self._finish(task_id, ok=False)
+                return
+
+            # NB: l'ammissione (scheduler VRAM-aware, §A.6) e' DENTRO _execute_task,
+            # per-tier: il peso dipende dalla RouteDecision del tier corrente.
+            ok = await self._execute_task(task_row, brief, repo, roots)
+            self._finish(task_id, ok=ok)
+        except asyncio.CancelledError:
+            # INVARIANTE §B.6.1: annullamento -> 'cancelled', mai appeso. Lo slot
+            # dello scheduler e' gia' rilasciato dai finally interni; qui si
+            # garantisce stato, done-event e queue_depth.
+            db.execute(
+                "UPDATE task SET status='cancelled' WHERE id=? "
+                "AND status NOT IN ('done','failed')", (task_id,))
+            self._kill_verify(task_id)
+            await bus.emit(None, "task_cancelled", {"task_id": task_id})
+            self._finish(task_id, ok=False)
+            # non ri-sollevo: l'annullamento e' cooperativo e gia' gestito.
+
+    def _finish(self, task_id: str, *, ok: bool) -> None:
+        """Chiusura idempotente di un task: done-event + queue_depth una volta."""
+        if self._done_events.get(task_id) and self._done_events[task_id].is_set():
+            return  # gia' chiuso (es. cancel arrivato mentre finiva)
+        self._task_ok[task_id] = ok
+        if task_id in self._done_events:
+            self._done_events[task_id].set()
+        self.queue_depth = max(0, self.queue_depth - 1)
+
+    def _db_status(self, task_id: str) -> str | None:
+        row = get_db().query_one("SELECT status FROM task WHERE id=?", (task_id,))
+        return row["status"] if row else None
+
+    # --- ciclo di vita: annullamento cooperativo (§B.2) ------------------------
+    async def cancel_task(self, task_id: str) -> bool:
+        """Annulla un task: uccide il verify se in corso, cancella la coroutine
+        (-> CancelledError gestito in _run_with_deps: stato 'cancelled', slot
+        rilasciato, done-event settato). Ritorna True se ha agito."""
+        db = get_db()
+        row = db.query_one("SELECT status FROM task WHERE id=?", (task_id,))
+        if not row:
+            return False
+        if row["status"] in ("done", "failed", "cancelled"):
+            return False
+        # termina un eventuale sottoprocesso verify (§B.2).
+        self._kill_verify(task_id)
+        t = self._task_coros.get(task_id)
+        if t and not t.done():
+            t.cancel()  # -> asyncio.CancelledError in _run_with_deps
+            return True
+        # non in volo (pending/blocked, oppure gia' finito): marca e sblocca i deps.
+        db.execute(
+            "UPDATE task SET status='cancelled' WHERE id=? "
+            "AND status NOT IN ('done','failed')", (task_id,))
+        await get_bus().emit(None, "task_cancelled", {"task_id": task_id})
+        self._finish(task_id, ok=False)
+        return True
+
+    async def cancel_plan(self, plan_id: str) -> None:
+        """Annulla un intero piano: tutti i suoi task + il gather. Piano ->
+        'cancelled' (§B.2)."""
+        db = get_db()
+        db.execute(
+            "UPDATE plan_document SET status='cancelled' WHERE id=? "
+            "AND status NOT IN ('done','failed')", (plan_id,))
+        task_rows = db.query("SELECT id FROM task WHERE plan_id=?", (plan_id,))
+        for r in task_rows:
+            await self.cancel_task(r["id"])
+        await get_bus().emit(None, "plan_cancelled", {"plan_id": plan_id})
+
+    # --- pausa/ripresa della coda (§B.2) ---------------------------------------
+    async def pause_queue(self) -> None:
+        await self.scheduler.pause()
+        get_db().set_state("queue_paused", "1")
+        await get_bus().emit(None, "queue_paused", {"paused": True})
+
+    async def resume_queue(self) -> None:
+        await self.scheduler.resume()
+        get_db().set_state("queue_paused", "0")
+        await get_bus().emit(None, "queue_resumed", {"paused": False})
+
+    async def _restore_paused_once(self) -> None:
+        """Ripristina lo stato di pausa persistito, una sola volta per processo."""
+        if self._paused_restored:
+            return
+        self._paused_restored = True
+        if get_db().get_state("queue_paused", "0") == "1":
+            self.scheduler.set_paused(True)
+
+    # --- veto pre-esecuzione: block/unblock (§B.1) -----------------------------
+    async def block_task(self, task_id: str) -> bool:
+        """Mette un veto: il task non verra' preso in carico. Vietato su un task
+        gia' in esecuzione (running/verifying) -> il chiamante restituisce 409."""
+        db = get_db()
+        row = db.query_one("SELECT status FROM task WHERE id=?", (task_id,))
+        if not row or row["status"] in ("running", "verifying", "done", "escalated"):
+            return False
+        db.execute("UPDATE task SET status='blocked' WHERE id=?", (task_id,))
+        await get_bus().emit(None, "task_blocked", {"task_id": task_id})
+        return True
+
+    async def unblock_task(self, task_id: str) -> bool:
+        db = get_db()
+        row = db.query_one("SELECT status FROM task WHERE id=?", (task_id,))
+        if not row or row["status"] != "blocked":
+            return False
+        db.execute("UPDATE task SET status='pending' WHERE id=?", (task_id,))
+        await get_bus().emit(None, "task_unblocked", {"task_id": task_id})
+        return True
+
+    # --- verify come sottoprocesso uccidibile (§B.2) ---------------------------
+    def _kill_verify(self, task_id: str) -> None:
+        proc = self._verify_procs.get(task_id)
+        if proc is not None and proc.poll() is None:
+            _terminate_process_group(proc)
 
     def _route_ladder(self, brief: TaskBrief) -> tuple[RouteDecision, list[RouteDecision]]:
         """La scala di autofix E' la scala di escalation del router (§A.5/A.7).
@@ -316,7 +476,7 @@ class ExecutorPool:
                     # _run_verify (exit code), sempre.
                     self._guard_verify_cmd(brief, original_verify_cmd)
                     passed, output = await asyncio.to_thread(
-                        self._run_verify, brief, repo, roots)
+                        self._run_verify, brief, repo, roots, task_id)
                     verify_exit = _parse_verify_exit(output)
                     db.execute("UPDATE task SET verify_output=? WHERE id=?",
                                (output, task_id))
@@ -427,6 +587,13 @@ class ExecutorPool:
         except asyncio.TimeoutError:
             error = f"timeout wall-clock {brief.timeout_s}s (possibile loop, §1.9)"
             await bus.emit(run_id, "error", {"detail": error})
+        except asyncio.CancelledError:
+            # annullamento cooperativo (§B.2): finalizza il run come 'cancelled' e
+            # RI-SOLLEVA, cosi' _run_with_deps porta il task a 'cancelled'.
+            db.execute(
+                "UPDATE run SET status='cancelled', ended_at=?, error=? WHERE id=?",
+                (utcnow(), "annullato", run_id))
+            raise
         except Exception as e:  # noqa: BLE001 — qualsiasi fallimento va MOSTRATO (4.8)
             error = f"{type(e).__name__}: {e}"
             await bus.emit(run_id, "error", {"detail": error})
@@ -474,9 +641,15 @@ class ExecutorPool:
                         "cost_usd": captured["cost"],
                     })
 
-    def _run_verify(self, brief: TaskBrief, repo: Path, roots) -> tuple[bool, str]:
+    def _run_verify(self, brief: TaskBrief, repo: Path, roots,
+                    task_id: str | None = None) -> tuple[bool, str]:
         """Esegue verify_cmd. L'exit code e' il fatto (§5.2). Difesa in profondita':
-        ricontrolla il comando e confina verify_cwd dentro le root (4.3)."""
+        ricontrolla il comando e confina verify_cwd dentro le root (4.3).
+
+        Ciclo di vita (§B.2): gira come `Popen` in un GRUPPO DI PROCESSO dedicato e
+        si registra in `_verify_procs[task_id]`, cosi' `cancel_task` puo' terminare
+        l'intero albero (POSIX killpg / Windows taskkill /T). Il timeout wall-clock
+        resta invariato."""
         from .policy import is_dangerous_bash
         if is_dangerous_bash(brief.verify_cmd):
             return False, f"verify_cmd distruttivo rifiutato: {brief.verify_cmd!r}"
@@ -484,18 +657,62 @@ class ExecutorPool:
             cwd = resolve_within_roots((repo / brief.verify_cwd), roots)
         except PathNotAllowed as e:
             return False, f"verify_cwd fuori dalle root: {e}"
+
+        popen_kwargs: dict = dict(
+            cwd=str(cwd), shell=True, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        # gruppo di processo dedicato: permette di uccidere anche i figli (§B.2).
+        if os.name == "nt":
+            popen_kwargs["creationflags"] = getattr(
+                subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        else:
+            popen_kwargs["start_new_session"] = True  # setsid -> os.killpg
+
         try:
-            proc = subprocess.run(
-                brief.verify_cmd, shell=True, cwd=str(cwd),
-                capture_output=True, text=True, timeout=brief.timeout_s or 900,
-            )
+            proc = subprocess.Popen(brief.verify_cmd, **popen_kwargs)  # noqa: S602
+        except Exception as e:  # noqa: BLE001
+            return False, f"verify_cmd errore: {type(e).__name__}: {e}"
+
+        if task_id:
+            self._verify_procs[task_id] = proc
+        try:
+            out, err = proc.communicate(timeout=brief.timeout_s or 900)
             output = f"$ {brief.verify_cmd}\n(exit {proc.returncode})\n"
-            output += (proc.stdout or "") + (proc.stderr or "")
+            output += (out or "") + (err or "")
             return proc.returncode == 0, output
         except subprocess.TimeoutExpired:
+            _terminate_process_group(proc)
+            try:
+                proc.communicate(timeout=5)
+            except (subprocess.SubprocessError, OSError):
+                pass
             return False, f"verify_cmd timeout: {brief.verify_cmd}"
         except Exception as e:  # noqa: BLE001
             return False, f"verify_cmd errore: {type(e).__name__}: {e}"
+        finally:
+            if task_id:
+                self._verify_procs.pop(task_id, None)
+
+
+def _terminate_process_group(proc: subprocess.Popen) -> None:
+    """Termina l'intero albero del verify (§B.2). POSIX: SIGTERM al process group
+    (start_new_session). Windows: `taskkill /T /F` (CREATE_NEW_PROCESS_GROUP).
+    Best-effort: un verify gia' morto non e' un errore."""
+    if proc.poll() is not None:
+        return
+    try:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                capture_output=True, timeout=10)
+        else:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+    except (OSError, subprocess.SubprocessError, ProcessLookupError):
+        try:
+            proc.kill()  # fallback: almeno il processo diretto
+        except (OSError, subprocess.SubprocessError):
+            pass
 
 
 def _parse_verify_exit(output: str) -> int | None:

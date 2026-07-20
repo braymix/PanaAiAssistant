@@ -28,7 +28,11 @@ const Argo = (() => {
   function subscribeGlobal(onEvent) {
     const es = new EventSource('/events');
     ['assistant_text', 'tool_use', 'verify_result', 'escalation', 'result',
-     'approval_requested', 'approval_resolved', 'plan_done', 'error', 'chat_delta']
+     'approval_requested', 'approval_resolved', 'plan_done', 'error', 'chat_delta',
+     'route_decision', 'config_warning', 'task_cancelled', 'plan_cancelled',
+     'queue_paused', 'queue_resumed', 'task_blocked', 'task_unblocked',
+     'conversation_deleted', 'plan_deleted', 'task_deleted',
+     'conversation_purged', 'plan_purged']
       .forEach((k) => es.addEventListener(k, (e) => onEvent({ kind: k, data: e.data })));
     return es;
   }
@@ -84,6 +88,7 @@ const Argo = (() => {
     const STYLE = {
       pending: 'b-pending', running: 'b-running', verifying: 'b-running',
       done: 'b-done', failed: 'b-failed', escalated: 'b-esc',
+      cancelled: 'b-failed', blocked: 'b-pending',
     };
     async function tick() {
       let s;
@@ -113,10 +118,78 @@ const Argo = (() => {
         });
         box.hidden = (s.pending_approvals || []).length === 0;
       }
-      if (['done', 'failed'].includes(s.plan_status)) clearInterval(timer);
+      if (['done', 'failed', 'cancelled'].includes(s.plan_status)) clearInterval(timer);
     }
     tick();
     const timer = setInterval(tick, 2500);
+  }
+
+  // --- ciclo di vita (§B): annulla / blocca / elimina / purga --------------
+  async function jsend(method, url, body) {
+    const r = await fetch(url, {
+      method, headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+    return r.json().catch(() => ({}));
+  }
+  const cancelPlan = (id) => jpost('/plans/' + id + '/cancel', {});
+  const cancelTask = (id) => jpost('/tasks/' + id + '/cancel', {});
+  const blockTask = (id) => jpost('/tasks/' + id + '/block', {});
+  const unblockTask = (id) => jpost('/tasks/' + id + '/unblock', {});
+  const softDeletePlan = (id) => jsend('DELETE', '/plans/' + id);
+  const softDeleteConversation = (id) => jsend('DELETE', '/conversations/' + id);
+  const purgePlan = (id) => jpost('/plans/' + id + '/purge', { confirm: true });
+  const purgeConversation = (id) =>
+    jpost('/conversations/' + id + '/purge', { confirm: true });
+  const pauseQueue = () => jpost('/queue/pause', {});
+  const resumeQueue = () => jpost('/queue/resume', {});
+
+  // toggle globale di pausa coda: aggiorna il bottone dallo stato reale (/queue)
+  async function wireQueuePause(btnId) {
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+    async function render() {
+      try {
+        const s = await (await fetch('/queue', { cache: 'no-store' })).json();
+        btn.dataset.paused = s.paused ? '1' : '0';
+        btn.textContent = s.paused ? '▶ Riprendi coda' : '⏸ Pausa coda';
+        btn.classList.toggle('is-paused', !!s.paused);
+      } catch (e) { /* rete giu' (§4.15) */ }
+    }
+    btn.onclick = async () => {
+      btn.disabled = true;
+      try {
+        if (btn.dataset.paused === '1') await resumeQueue(); else await pauseQueue();
+      } catch (e) { alert(e.message); }
+      btn.disabled = false; render();
+    };
+    render();
+  }
+
+  // menu azioni su un task nella pagina piano (annulla/blocca/elimina)
+  async function taskAction(action, taskId) {
+    try {
+      if (action === 'cancel') await cancelTask(taskId);
+      else if (action === 'block') await blockTask(taskId);
+      else if (action === 'unblock') await unblockTask(taskId);
+    } catch (e) { alert(e.message); }
+  }
+
+  async function planDanger(action, planId, backHref) {
+    try {
+      if (action === 'cancel') { await cancelPlan(planId); return; }
+      if (action === 'delete') {
+        if (!confirm('Eliminare il piano? (reversibile, resta nel log)')) return;
+        await softDeletePlan(planId);
+      } else if (action === 'purge') {
+        if (!confirm('ELIMINA DEFINITIVAMENTE: rimuove piano, task, run ed eventi. '
+                     + 'Irreversibile. Confermi?')) return;
+        if (!confirm('Ultima conferma: procedo con il purge definitivo?')) return;
+        await purgePlan(planId);
+      }
+      location.href = backHref || '/plans';
+    } catch (e) { alert(e.message); }
   }
 
   async function newChat() {
@@ -292,5 +365,8 @@ const Argo = (() => {
   return { pollStats, subscribeGlobal, appendLog, wireChat, approvePlan,
            monitorPlan, streamRun, newChat, decide, wireInstall, enablePush,
            loadProjects, addProject, newChatWithProject,
-           streamOllamaLogs, pollOllamaPs, deleteChat };
+           streamOllamaLogs, pollOllamaPs, deleteChat,
+           cancelPlan, cancelTask, blockTask, unblockTask,
+           softDeletePlan, softDeleteConversation, purgePlan, purgeConversation,
+           pauseQueue, resumeQueue, wireQueuePause, taskAction, planDanger };
 })();

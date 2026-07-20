@@ -21,9 +21,11 @@ async def dashboard(request: Request):
     # conversazioni + stato dell'ultimo piano collegato (per la chip "recente")
     convs = db.query(
         "SELECT c.*, (SELECT p.status FROM plan_document p "
-        " WHERE p.conversation_id=c.id ORDER BY p.created_at DESC LIMIT 1) "
+        " WHERE p.conversation_id=c.id AND p.deleted_at IS NULL "
+        " ORDER BY p.created_at DESC LIMIT 1) "
         " AS last_plan_status "
-        "FROM conversation c ORDER BY c.created_at DESC LIMIT 20")
+        "FROM conversation c WHERE c.deleted_at IS NULL "
+        "ORDER BY c.created_at DESC LIMIT 20")
     # contatori per i badge delle tile (reali)
     draft_plans = db.query_one(
         "SELECT COUNT(*) c FROM plan_document WHERE status='draft'")["c"]
@@ -43,8 +45,10 @@ async def dashboard(request: Request):
 async def plans_page(request: Request):
     plans = get_db().query(
         "SELECT p.id, p.status, p.created_at, "
-        "(SELECT COUNT(*) FROM task t WHERE t.plan_id=p.id) AS n_tasks "
-        "FROM plan_document p ORDER BY p.created_at DESC LIMIT 50")
+        "(SELECT COUNT(*) FROM task t WHERE t.plan_id=p.id "
+        " AND t.deleted_at IS NULL) AS n_tasks "
+        "FROM plan_document p WHERE p.deleted_at IS NULL "
+        "ORDER BY p.created_at DESC LIMIT 50")
     return templates.TemplateResponse(request, "plans.html", {
         "request": request, "plans": plans,
     })
@@ -91,7 +95,8 @@ async def chat_page(request: Request, conversation_id: str):
 async def plan_page(request: Request, plan_id: str):
     db = get_db()
     plan = db.query_one("SELECT * FROM plan_document WHERE id=?", (plan_id,))
-    tasks = db.query("SELECT * FROM task WHERE plan_id=? ORDER BY seq", (plan_id,))
+    tasks = db.query("SELECT * FROM task WHERE plan_id=? AND deleted_at IS NULL "
+                     "ORDER BY seq", (plan_id,))
     briefs = [json.loads(t["brief_json"]) for t in tasks]
     raw = json.loads(plan["raw_json"]) if plan else {}
     return templates.TemplateResponse(request, "plan.html", {
