@@ -42,6 +42,28 @@ async def new_conversation(body: NewConversation):
     return {"conversation_id": cid, "mode": mode}
 
 
+class RenameConversation(BaseModel):
+    title: str
+
+
+@router.patch("/{conversation_id}")
+async def rename_conversation(conversation_id: str, body: RenameConversation):
+    """Rinomina il titolo di una chat. Emette `conversation_renamed` cosi' altre
+    schede aperte restano coerenti via SSE (§B.6.5)."""
+    db = get_db()
+    if not db.query_one("SELECT id FROM conversation WHERE id=?", (conversation_id,)):
+        raise HTTPException(status_code=404, detail="conversazione inesistente")
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="titolo vuoto")
+    title = title[:120]
+    db.execute("UPDATE conversation SET title=? WHERE id=?", (title, conversation_id))
+    from ..events import get_bus
+    await get_bus().emit(None, "conversation_renamed",
+                         {"conversation_id": conversation_id, "title": title})
+    return {"status": "renamed", "conversation_id": conversation_id, "title": title}
+
+
 @router.delete("/{conversation_id}")
 async def delete_conversation(conversation_id: str):
     """Elimina una chat: conversazione + messaggi. NON tocca `event` (append-only,

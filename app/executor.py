@@ -281,6 +281,14 @@ class ExecutorPool:
             await self.cancel_task(r["id"])
         await get_bus().emit(None, "plan_cancelled", {"plan_id": plan_id})
 
+    async def cancel_all(self) -> int:
+        """Annulla TUTTI i piani in volo (riavvio servizi / reset, § sistema).
+        Ritorna il numero di piani annullati."""
+        plan_ids = list(self._plan_tasks.keys())
+        for pid in plan_ids:
+            await self.cancel_plan(pid)
+        return len(plan_ids)
+
     # --- pausa/ripresa della coda (§B.2) ---------------------------------------
     async def pause_queue(self) -> None:
         await self.scheduler.pause()

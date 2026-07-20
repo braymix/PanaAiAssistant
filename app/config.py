@@ -245,6 +245,22 @@ class Settings:
     vapid_keys_path: Path = Path(os.environ.get("ARGO_VAPID_KEYS", "vapid_keys.json"))
     vapid_sub: str = os.environ.get("ARGO_VAPID_SUB", "mailto:argo@localhost")
 
+    # --- comandi di sistema (riavvio/spegnimento app, spegnimento PC, reset) -----
+    # Interruttore di sicurezza per le SOLE azioni a livello di processo/OS
+    # (riavvia app, spegni app, spegni PC). Sono comunque protette da confirm=true;
+    # questo le disabilita del tutto. Il reset DB non e' toccato da questo flag.
+    system_controls_enabled: bool = (
+        os.environ.get("ARGO_SYSTEM_CONTROLS", "1") != "0")
+    # grazia (s) tra la risposta HTTP/evento SSE e l'effetto reale, cosi' il
+    # telefono riceve la conferma prima che il processo muoia o il PC si spenga.
+    system_action_delay_s: float = float(
+        os.environ.get("ARGO_SYSTEM_DELAY_S", "2"))
+    # comando per RILANCIARE l'app dopo un riavvio. Vuoto = auto: l'interprete
+    # corrente con `-m app.main`. Override completo via ARGO_RESTART_CMD.
+    restart_cmd: str = os.environ.get("ARGO_RESTART_CMD", "")
+    # comando per SPEGNERE il PC. Vuoto = auto per piattaforma (Windows/POSIX).
+    poweroff_cmd: str = os.environ.get("ARGO_POWEROFF_CMD", "")
+
     def resolved_roots(self) -> list[Path]:
         """Le root note (document_root + self_root, in testa) piu' le eventuali
         ARGO_ROOTS extra, deduplicate. document_root e' SEMPRE presente: cosi'
