@@ -28,7 +28,8 @@ const Argo = (() => {
   function subscribeGlobal(onEvent) {
     const es = new EventSource('/events');
     ['assistant_text', 'tool_use', 'verify_result', 'escalation', 'result',
-     'approval_requested', 'approval_resolved', 'plan_done', 'error', 'chat_delta',
+     'approval_requested', 'approval_resolved', 'plan_done', 'error',
+     'chat_delta', 'chat_done',
      'route_decision', 'config_warning', 'task_cancelled', 'plan_cancelled',
      'queue_paused', 'queue_resumed', 'task_blocked', 'task_unblocked',
      'conversation_deleted', 'plan_deleted', 'task_deleted', 'run_deleted',
@@ -52,37 +53,106 @@ const Argo = (() => {
   function wireChat(cid, repo) {
     const input = document.getElementById('input');
     const messages = document.getElementById('messages');
+    const sendBtn = document.getElementById('send');
+    const viaBtn = document.getElementById('via');
     const addBubble = (role, text) => {
       const wrap = document.createElement('div'); wrap.className = 'msg ' + role;
       const b = document.createElement('div'); b.className = 'bubble'; b.textContent = text;
       wrap.appendChild(b); messages.appendChild(wrap);
       wrap.scrollIntoView(); return b;
     };
-    let current = null;
+    let current = null;      // bolla assistant in costruzione
+    let waiting = false;     // turno in corso: attende delta dal planner
+    // indicatore "sta scrivendo…": appare finche' non arriva il primo delta
+    const setBusy = (on) => {
+      waiting = on;
+      sendBtn.disabled = on;
+      sendBtn.textContent = on ? 'Invio…' : 'Invia';
+      let ind = document.getElementById('typing');
+      if (on && !ind) {
+        ind = document.createElement('div');
+        ind.id = 'typing'; ind.className = 'msg assistant typing';
+        ind.innerHTML = '<div class="bubble">il planner sta scrivendo…</div>';
+        messages.appendChild(ind); ind.scrollIntoView();
+      } else if (!on && ind) {
+        ind.remove();
+      }
+    };
     subscribeGlobal((ev) => {
       if (ev.kind === 'chat_delta') {
         const d = JSON.parse(ev.data);
         if (d.conversation_id !== cid) return;
+        const ind = document.getElementById('typing');
+        if (ind) ind.remove();               // primo pezzo: via l'indicatore
         if (!current) current = addBubble('assistant', '');
         current.textContent += d.text;
+        current.scrollIntoView();
       }
-      if (ev.kind === 'chat_done') current = null;
+      if (ev.kind === 'chat_done') {
+        let d = {}; try { d = JSON.parse(ev.data); } catch (e) {}
+        if (d.conversation_id && d.conversation_id !== cid) return;
+        current = null; setBusy(false);       // turno finito: sblocca l'invio
+      }
+      if (ev.kind === 'error' && waiting) {
+        // il turno e' fallito lato server: sblocca e mostra il motivo
+        let d = {}; try { d = JSON.parse(ev.data); } catch (e) {}
+        setBusy(false); current = null;
+        addBubble('assistant', '⚠ ' + (d.detail || 'errore del planner'));
+      }
     });
-    document.getElementById('send').onclick = async () => {
+    const send = async () => {
+      if (waiting) return;                     // un turno alla volta
       const text = input.value.trim(); if (!text) return;
       addBubble('user', text); input.value = ''; current = null;
-      await jpost('/chat/send', { conversation_id: cid, text, repo_path: repo });
+      setBusy(true);
+      try {
+        await jpost('/chat/send', { conversation_id: cid, text, repo_path: repo });
+      } catch (e) {
+        setBusy(false);
+        addBubble('assistant', '⚠ invio fallito: ' + e.message);
+      }
     };
-    document.getElementById('via').onclick = async () => {
+    sendBtn.onclick = send;
+    // Invio = manda, Shift+Invio = a capo (comodo da tastiera fisica)
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    });
+    viaBtn.onclick = async () => {
+      viaBtn.disabled = true; const label = viaBtn.textContent;
+      viaBtn.textContent = 'Genero il piano…';
       try {
         const r = await jpost('/plans/via', { conversation_id: cid, repo_path: repo || '.' });
         location.href = r.next;
-      } catch (e) { alert('Piano rifiutato: ' + e.message); }
+      } catch (e) {
+        viaBtn.disabled = false; viaBtn.textContent = label;
+        alert('Piano rifiutato: ' + e.message);
+      }
     };
   }
 
   async function approvePlan(planId) {
     await jpost('/plans/' + planId + '/approve', {});
+  }
+
+  // etichetta umana dello stato del piano: chiarisce QUANDO diventa effettivo.
+  // 'draft' = proposta non ancora avviata; 'executing' = in corso; ecc.
+  const PLAN_LABEL = {
+    draft: 'Bozza — non ancora avviato',
+    executing: 'In esecuzione',
+    running: 'In esecuzione',
+    done: 'Completato',
+    failed: 'Fallito',
+    cancelled: 'Annullato',
+  };
+  // aggiorna il banner di stato del piano (#plan-state), se presente in pagina
+  function renderPlanState(status) {
+    const el = document.getElementById('plan-state');
+    if (!el) return;
+    el.textContent = PLAN_LABEL[status] || status;
+    el.className = 'plan-state badge b-' + status;
+    const btn = document.getElementById('approve');
+    // a piano avviato/finito il tasto Esegui non ha piu' senso: nascondilo
+    if (btn && status !== 'draft') btn.hidden = true;
   }
 
   // monitor live del piano: aggiorna i badge dei task e le approvazioni pendenti
@@ -96,6 +166,7 @@ const Argo = (() => {
       let s;
       try { s = await (await fetch('/plans/' + planId + '/status')).json(); }
       catch (e) { return; }        // rete giu' (§4.15): riprova
+      renderPlanState(s.plan_status);
       (s.tasks || []).forEach((t) => {
         const li = document.querySelector('[data-task="' + t.id + '"]');
         if (!li) return;
@@ -449,7 +520,7 @@ const Argo = (() => {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 
   return { pollStats, subscribeGlobal, appendLog, wireChat, approvePlan,
-           monitorPlan, streamRun, newChat, decide, wireInstall, enablePush,
+           monitorPlan, renderPlanState, streamRun, newChat, decide, wireInstall, enablePush,
            loadProjects, addProject, newChatWithProject,
            streamOllamaLogs, pollOllamaPs, deleteChat, renameChat,
            systemAction, systemReset,
