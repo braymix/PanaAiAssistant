@@ -6,7 +6,17 @@
 {% if not plan %}
 <p class="empty">Piano inesistente.</p>
 {% else %}
-<p class="summary">{{ summary or 'è questo che stai approvando: file + task.' }}</p>
+<!-- stato del piano ben visibile: chiarisce se e' ancora una bozza o gia' avviato -->
+<div class="plan-state-row">
+  <span id="plan-state" class="plan-state badge b-{{ plan['status'] }}">{{ plan['status'] }}</span>
+</div>
+<p class="summary">
+  {% if plan['status'] == 'draft' %}
+  Questa e' una <strong>proposta</strong>: diventa effettiva solo quando premi <strong>Esegui ▶</strong>.
+  {% else %}
+  {{ summary or 'è questo che stai approvando: file + task.' }}
+  {% endif %}
+</p>
 
 <!-- §3.2: mostra i file che verranno toccati: e' QUELLO che stai approvando -->
 <h3>File nel perimetro</h3>
@@ -65,10 +75,17 @@
 {% if plan %}
 <script>
   const PLAN_ID = "{{ plan['id'] }}";
+  Argo.renderPlanState("{{ plan['status'] }}");   // etichetta chiara dello stato
   document.getElementById('approve').onclick = async function () {
-    this.disabled = true; this.textContent = 'In esecuzione…';
-    await Argo.approvePlan(PLAN_ID);      // resta sulla pagina e monitora
-    Argo.monitorPlan(PLAN_ID);
+    this.disabled = true; this.textContent = 'Avvio…';
+    try {
+      await Argo.approvePlan(PLAN_ID);    // resta sulla pagina e monitora
+      Argo.renderPlanState('executing');  // feedback immediato: ora e' effettivo
+      Argo.monitorPlan(PLAN_ID);
+    } catch (e) {
+      this.disabled = false; this.textContent = 'Esegui ▶';
+      alert('Avvio fallito: ' + e.message);
+    }
   };
   // se il piano e' gia' in esecuzione/finito, monitora subito
   if ("{{ plan['status'] }}" !== "draft") Argo.monitorPlan(PLAN_ID);

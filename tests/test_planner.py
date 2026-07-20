@@ -57,11 +57,11 @@ class FakePlannerClient:
 
 class _PlanJSONClient:
     """Finge un planner che restituisce un PlanDocument con path ASSOLUTI FUORI
-    dalle root (come il bug reale del caso Garlasco)."""
+    dalle root (come il bug reale osservato)."""
     PAYLOAD = (
-        '{"repo_path": "C:\\\\Users\\\\x\\\\Documents\\\\Garlasco", '
+        '{"repo_path": "C:\\\\Users\\\\x\\\\Documents\\\\Progetto", '
         '"tasks": [{"id": "t1", "title": "Sez 1", "instructions": "scrivi", '
-        '"files_allowed": ["C:\\\\Users\\\\x\\\\Documents\\\\Garlasco\\\\intro.md"], '
+        '"files_allowed": ["C:\\\\Users\\\\x\\\\Documents\\\\Progetto\\\\intro.md"], '
         '"verify_cmd": "python -c \\"pass\\"", "verify_cwd": "C:\\\\altrove"}]}'
     )
 

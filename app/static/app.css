@@ -267,7 +267,14 @@ h3:first-child { margin-top: 0; }
 }
 .composer-actions { display: flex; gap: 10px; }
 
+/* indicatore "sta scrivendo…" nella chat */
+.msg.typing .bubble { color: var(--muted); font-style: italic; opacity: .8; }
+
 /* ===================== PLAN ===================== */
+/* banner di stato del piano: si capisce a colpo d'occhio se e' bozza o avviato */
+.plan-state-row { margin: 0 0 10px; }
+.plan-state { display: inline-block; font-size: 12.5px; padding: 5px 12px; }
+.summary strong { color: var(--fg); }
 .summary { margin: 0 0 6px; font-size: 13px; color: var(--muted); line-height: 1.5; }
 .file-chips { display: flex; flex-wrap: wrap; gap: 7px; }
 .file-chips code {
