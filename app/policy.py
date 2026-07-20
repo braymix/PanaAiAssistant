@@ -26,6 +26,10 @@ class GateContext:
     files_allowed_resolved: set[Path]
     roots: list[Path]
     push_counter: dict = field(default_factory=dict)  # {"pushes": int}
+    # buffer dei verdetti non-allow del run corrente (deny/ask). L'autofix lo
+    # legge per diagnosticare un PERIMETER_BLOCK (Write fuori files_allowed)
+    # senza dover interrogare il bus/DB (missione autofix).
+    policy_events: list = field(default_factory=list)
 
 
 def cmd_matches_allowlist(command: str, allowlist: list[str]) -> bool:
@@ -102,6 +106,8 @@ def make_policy_gate(ctx: GateContext):
             return PermissionResultAllow()
 
         if verdict == "deny":
+            # traccia il verdetto per l'autofix (perimeter block) e sul bus.
+            ctx.policy_events.append({"kind": "policy_deny", "tool_name": tool_name})
             await bus.emit(ctx.run_id, "policy_deny", {
                 "tool_name": tool_name, "reason": reason,
                 "tool_input": input_data,
@@ -109,6 +115,7 @@ def make_policy_gate(ctx: GateContext):
             return PermissionResultDeny(message=reason, interrupt=False)
 
         # verdict == "ask": ECCEZIONE -> UNA push. Metrica qualita' del piano.
+        ctx.policy_events.append({"kind": "policy_ask", "tool_name": tool_name})
         ctx.push_counter["pushes"] = ctx.push_counter.get("pushes", 0) + 1
         decision = await get_broker().request(
             run_id=ctx.run_id, tool_name=tool_name, tool_input=input_data,

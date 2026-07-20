@@ -14,8 +14,13 @@ from __future__ import annotations
 import asyncio
 import json
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
+from .autofix import (
+    AttemptRecord, FailureClass, build_fix_prompt, classify_failure,
+    diff_changed, git_diff_tail, snapshot_changes,
+)
 from .backends import make_executor_options
 from .briefs import TaskBrief
 from .config import get_settings
@@ -25,6 +30,22 @@ from .ids import new_id
 from .policy import GateContext, make_policy_gate
 from .push import send_push
 from .security import resolve_within_roots, PathNotAllowed
+
+
+@dataclass
+class _Tier:
+    """Un livello della scala di autofix (missione autofix).
+
+    backend: "ollama" | "subscription"; model: override del modello (None = default
+    del backend); is_local: True per i tier Ollama; is_escalation: True SOLO per il
+    tier abbonamento (mantiene l'evento 'escalation' + push legacy, §4.3).
+    """
+    backend: str
+    model: str | None
+    label: str            # "ollama" | "ollama:<model>" | "subscription"
+    is_local: bool
+    rounds: int
+    is_escalation: bool
 
 
 class ExecutorPool:
@@ -129,12 +150,36 @@ class ExecutorPool:
         self._done_events[task_row["id"]].set()
         self.queue_depth -= 1
 
+    def _autofix_tiers(self, brief: TaskBrief) -> list[_Tier]:
+        """La scala di autofix (missione autofix): Ollama primario -> eventuali
+        modelli locali piu' forti -> abbonamento (l'escalation esistente).
+
+        I round del tier locale sono subordinati a max_local_retries: senza le
+        nuove env il comportamento resta quello attuale (Ollama -> retry ->
+        escalation), solo informato dall'errore invece che cieco.
+        """
+        s = self.settings
+        local_rounds = max(1, min(s.autofix_max_rounds, s.max_local_retries + 1))
+        tiers = [_Tier("ollama", None, "ollama", True, local_rounds, False)]
+        for m in s.autofix_local_tiers:
+            tiers.append(_Tier("ollama", m, f"ollama:{m}", True, local_rounds, False))
+        # tier abbonamento: 1 tentativo, come l'escalation di oggi (§3.5/M4).
+        tiers.append(_Tier("subscription", None, "subscription", False, 1, True))
+        return tiers
+
     async def _execute_task(self, task_row, brief: TaskBrief, repo: Path,
                             roots) -> bool:
         db = get_db()
+        bus = get_bus()
         task_id = task_row["id"]
 
+        # INVARIANTE 2: verify_cmd immutabile nel loop. Lo catturiamo qui e lo
+        # riverifichiamo prima di ogni esecuzione: un modello non deve poter
+        # riscrivere il proprio test per farlo passare.
+        original_verify_cmd = brief.verify_cmd
+
         # risolve e valida il perimetro files_allowed (regola 4.3) allo start.
+        # INVARIANTE 3: il perimetro resta questo per TUTTI i tentativi.
         try:
             files_allowed = {
                 resolve_within_roots((repo / f), roots) for f in brief.files_allowed
@@ -146,69 +191,164 @@ class ExecutorPool:
             )
             return False
 
-        backend = "ollama"
-        attempts = 0
-        max_attempts = self.settings.max_local_retries + 1
+        history: list[AttemptRecord] = []
+        attempt = 0                      # contatore globale dei tentativi
+        tiers = self._autofix_tiers(brief)
+        prev_label: str | None = None
 
-        while attempts < max_attempts:
-            attempts += 1
-            db.execute(
-                "UPDATE task SET status='running', backend=?, attempts=? WHERE id=?",
-                (backend, attempts, task_id),
-            )
-            await self._run_once(task_id, brief, repo, files_allowed, roots, backend)
-
-            db.execute("UPDATE task SET status='verifying' WHERE id=?", (task_id,))
-            # verify_cmd puo' durare minuti: in un thread, altrimenti blocca il
-            # solo event loop del processo (§2: un solo processo asyncio).
-            passed, output = await asyncio.to_thread(
-                self._run_verify, brief, repo, roots)
-            db.execute("UPDATE task SET verify_output=? WHERE id=?", (output, task_id))
-            await get_bus().emit(None, "verify_result", {
-                "task_id": task_id, "passed": passed,
-                "output_tail": output[-400:],
-            })
-
-            if passed:
-                db.execute("UPDATE task SET status='done' WHERE id=?", (task_id,))
-                return True
-
-            if attempts >= max_attempts and backend == "ollama":
-                # escalation all'abbonamento (§3.5/M4)
-                backend = "subscription"
-                attempts = 0
-                max_attempts = 1
+        for tier in tiers:
+            if prev_label is not None:
+                await bus.emit(None, "autofix_escalate_tier", {
+                    "task_id": task_id, "from": prev_label, "to": tier.label,
+                })
+            if tier.is_escalation:
+                # escalation esistente (§3.5/M4): evento + push col testo attuale.
                 db.execute("UPDATE task SET status='escalated' WHERE id=?", (task_id,))
-                await get_bus().emit(None, "escalation", {
+                await bus.emit(None, "escalation", {
                     "task_id": task_id,
                     "reason": "MAX_LOCAL_RETRIES esaurito su Ollama",
                 })
                 send_push("Argo · escalation",
                           f"Task '{brief.title}' passato all'abbonamento", url="/")
+            prev_label = tier.label
 
+            for _ in range(tier.rounds):
+                attempt += 1
+
+                # reset opzionale tra i tentativi (§6): riparte pulito sui soli
+                # files_allowed se il repo e' git.
+                if history and self.settings.autofix_reset_between_attempts:
+                    self._git_reset_perimeter(repo, brief.files_allowed)
+
+                # INVARIANTE 2 (guardia esplicita): il verify_cmd non e' cambiato.
+                self._guard_verify_cmd(brief, original_verify_cmd)
+
+                # tentativo 1: prompt originale (invariato). Poi: fix-brief con la
+                # storia completa dei fallimenti (missione autofix).
+                if not history:
+                    prompt = _executor_prompt(brief)
+                else:
+                    diff_tail = git_diff_tail(
+                        repo, brief.files_allowed,
+                        self.settings.autofix_diff_tail_lines)
+                    prompt = build_fix_prompt(
+                        brief, history, diff_tail,
+                        self.settings.autofix_diff_tail_lines)
+
+                status = "escalated" if tier.is_escalation else "running"
+                db.execute(
+                    "UPDATE task SET status=?, backend=?, attempts=?, "
+                    "autofix_round=? WHERE id=?",
+                    (status, tier.label, attempt, attempt, task_id),
+                )
+
+                pre = snapshot_changes(repo, brief.files_allowed)
+                run_id, run_error, policy_events = await self._run_once(
+                    task_id, brief, repo, files_allowed, roots,
+                    tier.backend, tier.model, prompt, attempt)
+                post = snapshot_changes(repo, brief.files_allowed)
+                changed_files = diff_changed(pre, post)
+
+                db.execute("UPDATE task SET status='verifying' WHERE id=?", (task_id,))
+                # verify_cmd puo' durare minuti: in un thread, altrimenti blocca il
+                # solo event loop del processo (§2: un solo processo asyncio).
+                # INVARIANTE 1: e' _run_verify (exit code) a decidere, sempre.
+                self._guard_verify_cmd(brief, original_verify_cmd)
+                passed, output = await asyncio.to_thread(
+                    self._run_verify, brief, repo, roots)
+                verify_exit = _parse_verify_exit(output)
+                db.execute("UPDATE task SET verify_output=? WHERE id=?",
+                           (output, task_id))
+                await bus.emit(None, "verify_result", {
+                    "task_id": task_id, "passed": passed,
+                    "output_tail": output[-400:],
+                })
+                await bus.emit(None, "autofix_attempt", {
+                    "task_id": task_id, "attempt": attempt,
+                    "backend": tier.label, "model": tier.model, "passed": passed,
+                })
+
+                if passed:
+                    db.execute("UPDATE task SET status='done' WHERE id=?", (task_id,))
+                    return True
+
+                # diagnosi deterministica del fallimento (§3.1). Non ci si fida
+                # MAI dell'autovalutazione del modello.
+                fc = classify_failure(
+                    verify_exit=verify_exit, verify_output=output,
+                    run_error=run_error, changed_files=changed_files,
+                    policy_events=policy_events)
+                db.execute("UPDATE task SET failure_class=? WHERE id=?",
+                           (fc.value, task_id))
+                db.execute("UPDATE run SET failure_class=? WHERE id=?",
+                           (fc.value, run_id))
+                await bus.emit(run_id, "autofix_diagnose", {
+                    "task_id": task_id, "attempt": attempt,
+                    "failure_class": fc.value, "output_tail": output[-400:],
+                })
+                history.append(AttemptRecord(
+                    attempt=attempt, backend=tier.label, failure_class=fc,
+                    verify_exit=verify_exit, output_tail=output,
+                    changed_files=changed_files))
+
+        # RESA (§4.4 della missione): esaurita la scala, il task fallisce.
+        last_fc = history[-1].failure_class.value if history else FailureClass.UNKNOWN.value
+        last_tail = history[-1].output_tail[-400:] if history else ""
         db.execute("UPDATE task SET status='failed' WHERE id=?", (task_id,))
+        await bus.emit(None, "autofix_gaveup", {
+            "task_id": task_id, "rounds": attempt, "last_failure_class": last_fc,
+        })
+        send_push(
+            "Argo · autofix arreso",
+            f"Task '{brief.title}' fallito dopo {attempt} tentativi "
+            f"({last_fc}). {last_tail[-160:]}",
+            url="/")
         return False
 
+    def _guard_verify_cmd(self, brief: TaskBrief, original: str) -> None:
+        """INVARIANTE 2: il verify_cmd usato dal loop e' SEMPRE quello del brief,
+        mai un output del modello. Se qualcosa lo ha mutato, e' un bug: fermati."""
+        if brief.verify_cmd != original:
+            raise AssertionError(
+                "verify_cmd mutato durante il loop di autofix: invariante violata "
+                f"(atteso {original!r}, trovato {brief.verify_cmd!r})")
+
+    def _git_reset_perimeter(self, repo: Path, files_allowed: list[str]) -> None:
+        """`git checkout --` sui soli files_allowed (§6). Non-distruttivo altrove."""
+        if not (repo / ".git").exists():
+            return
+        try:
+            subprocess.run(
+                ["git", "checkout", "--", *files_allowed],
+                cwd=str(repo), capture_output=True, text=True, timeout=15,
+            )
+        except (OSError, subprocess.SubprocessError):
+            pass  # best-effort: se il reset non riesce, si prosegue sul parziale
+
     async def _run_once(self, task_id: str, brief: TaskBrief, repo: Path,
-                        files_allowed, roots, backend: str) -> None:
+                        files_allowed, roots, backend: str, model: str | None,
+                        prompt: str, attempt: int) -> tuple[str, str | None, list]:
+        """Guida UN tentativo. Ritorna (run_id, error, policy_events) per la
+        diagnosi in `_execute_task`. Il `prompt` e il `model` arrivano dal
+        chiamante (l'autofix decide se e' il prompt originale o un fix-brief)."""
         db = get_db()
         bus = get_bus()
         run_id = new_id("run")
-        model = (self.settings.ollama_model if backend == "ollama"
-                 else self.settings.subscription_model or "default")
+        resolved_model = model or (
+            self.settings.ollama_model if backend == "ollama"
+            else self.settings.subscription_model or "default")
         db.execute(
-            "INSERT INTO run(id, task_id, backend, model, status, started_at) "
-            "VALUES(?,?,?,?,?,?)",
-            (run_id, task_id, backend, model, "running", utcnow()),
+            "INSERT INTO run(id, task_id, backend, model, status, started_at, "
+            "attempt) VALUES(?,?,?,?,?,?,?)",
+            (run_id, task_id, backend, resolved_model, "running", utcnow(), attempt),
         )
 
         gate_ctx = GateContext(run_id=run_id, files_allowed_resolved=files_allowed,
                                roots=roots, push_counter=self.pushes)
         can_use_tool = make_policy_gate(gate_ctx)
         options = make_executor_options(
-            self.settings, str(repo), can_use_tool, brief.max_turns, backend)
+            self.settings, str(repo), can_use_tool, brief.max_turns, backend, model)
 
-        prompt = _executor_prompt(brief)
         captured = {"cost": 0.0, "turns": 0, "session_id": None}
         error = None
         try:
@@ -231,6 +371,7 @@ class ExecutorPool:
             ("error" if error else "done", captured["cost"], captured["turns"],
              captured["session_id"], utcnow(), error, run_id),
         )
+        return run_id, error, gate_ctx.policy_events
 
     async def _drive_client(self, ClientCls, options, prompt, run_id, bus, captured):
         db = get_db()
@@ -289,6 +430,14 @@ class ExecutorPool:
             return False, f"verify_cmd timeout: {brief.verify_cmd}"
         except Exception as e:  # noqa: BLE001
             return False, f"verify_cmd errore: {type(e).__name__}: {e}"
+
+
+def _parse_verify_exit(output: str) -> int | None:
+    """Estrae l'exit code dall'output di `_run_verify` ('(exit N)'). None se il
+    verify non e' nemmeno partito (timeout/errore infra: nessun exit code)."""
+    import re
+    m = re.search(r"\(exit (-?\d+)\)", output or "")
+    return int(m.group(1)) if m else None
 
 
 def _executor_prompt(brief: TaskBrief) -> str:

@@ -67,8 +67,12 @@ def make_via_options(settings: Settings, cwd: str, can_use_tool: Callable,
 
 
 def make_executor_options(settings: Settings, cwd: str, can_use_tool: Callable,
-                          max_turns: int, backend: str):
-    """Executor. backend='ollama' -> env verso Ollama; 'subscription' -> escalation."""
+                          max_turns: int, backend: str, model: str | None = None):
+    """Executor. backend='ollama' -> env verso Ollama; 'subscription' -> escalation.
+
+    `model` (opzionale) sovrascrive il modello del backend: l'autofix lo usa per i
+    tier locali piu' forti (ARGO_AUTOFIX_LOCAL_TIERS) senza cambiare backend.
+    """
     from claude_agent_sdk import ClaudeAgentOptions
     kwargs = dict(
         cwd=cwd,
@@ -79,7 +83,9 @@ def make_executor_options(settings: Settings, cwd: str, can_use_tool: Callable,
     )
     if backend == "ollama":
         kwargs["env"] = ollama_env(settings)  # §1.2
-        kwargs["model"] = settings.ollama_model
+        kwargs["model"] = model or settings.ollama_model
+    elif model:
+        kwargs["model"] = model
     elif settings.subscription_model:
         kwargs["model"] = settings.subscription_model
     return ClaudeAgentOptions(**kwargs)
