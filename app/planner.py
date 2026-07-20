@@ -290,7 +290,7 @@ async def generate_plan(conversation_id: str, repo_path: str,
             f"python -c \"...\" (vedi regole).\n"
             f"repo_path DEVE essere ESATTAMENTE: {repo_path}\n"
             f"In files_allowed usa SOLO percorsi RELATIVI a repo_path (es. "
-            f"'CASO_GARLASCO.md' o 'sezioni/intro.md'), MAI percorsi assoluti e "
+            f"'README.md' o 'sezioni/intro.md'), MAI percorsi assoluti e "
             f"MAI cartelle diverse da repo_path.\n"
             f"Rispondi con UN SOLO oggetto JSON, niente altro testo."
         )
@@ -320,7 +320,7 @@ async def generate_plan(conversation_id: str, repo_path: str,
             f"Il planner non ha risposto in JSON ({e}). Anteprima: "
             f"{joined[:300]!r}. Riprova chiedendo in chat un piano piu' concreto.")
     # FORZA il repo_path al progetto scelto: il planner tende a inventarne uno
-    # (es. C:\Users\...\Documents\Garlasco) che cade fuori dalle root e fa fallire
+    # (es. C:\Users\...\Documents\Progetto) che cade fuori dalle root e fa fallire
     # tutto. E' l'utente col progetto a decidere DOVE si scrive, non il planner.
     data["repo_path"] = repo_path
     plan = PlanDocument.from_dict(data)
