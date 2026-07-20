@@ -201,6 +201,50 @@ class _StaleResumeClient:
         yield AssistantMessage([TextBlock("ripartito da zero")])
 
 
+class _BadThenGoodJSONClient:
+    """Prima risposta: JSON rotto (virgolette non escappate). Alla richiesta di
+    autocorrezione (il prompt contiene i marcatori <<< >>>): JSON valido."""
+    VALID = ('{"repo_path": "X", "tasks": [{"id": "t1", "title": "Sez 1", '
+             '"instructions": "scrivi", "files_allowed": ["intro.md"], '
+             '"verify_cmd": "python -c \\"pass\\"", "verify_cwd": "."}]}')
+    BROKEN = '{"repo_path": "X", "tasks": [ROTTO senza virgolette]}'
+
+    def __init__(self, options=None):
+        self.options = options
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def query(self, prompt):
+        self.is_fix = "<<<" in prompt   # e' la richiesta di autocorrezione?
+
+    async def receive_response(self):
+        payload = self.VALID if getattr(self, "is_fix", False) else self.BROKEN
+        yield AssistantMessage([TextBlock(payload)])
+
+
+def test_generate_plan_autocorrects_invalid_json(db):
+    """Se il primo JSON e' rotto, il planner viene richiamato per correggerlo e
+    il piano si crea comunque, senza scaricare l'errore sull'utente."""
+    from app.planner import generate_plan, set_client_cls
+
+    set_client_cls(_BadThenGoodJSONClient)
+    try:
+        cid = new_id("conv")
+        db.execute(
+            "INSERT INTO conversation(id, title, plan_mode, created_at) VALUES(?,?,?,?)",
+            (cid, "t", 1, utcnow()))
+        plan_id = asyncio.run(generate_plan(cid, "."))
+        assert plan_id
+        n = db.query_one("SELECT COUNT(*) c FROM task WHERE plan_id=?", (plan_id,))["c"]
+        assert n == 1
+    finally:
+        set_client_cls(None)
+
+
 def test_chat_stream_recovers_from_stale_resume(db):
     """Se la sessione da riprendere non esiste piu', il turno riparte senza
     resume invece di crashare (500)."""

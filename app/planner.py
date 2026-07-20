@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import platform
+import re
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from .backends import make_planner_options, make_via_options
@@ -89,15 +90,24 @@ VIA_SYSTEM = (
 def _extract_json(text: str) -> dict:
     text = text.strip()
     if text.startswith("```"):
-        # rimuove eventuale fence ```json ... ```
-        text = text.split("```", 2)[1]
-        if text.startswith("json"):
+        # rimuove un eventuale fence ```json ... ``` (anche senza chiusura)
+        text = text[3:]
+        if text[:4].lower() == "json":
             text = text[4:]
-        text = text.strip("`").strip()
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
     start, end = text.find("{"), text.rfind("}")
     if start == -1 or end == -1:
         raise ValueError("Nessun JSON nel testo del planner.")
-    return json.loads(text[start:end + 1])
+    blob = text[start:end + 1]
+    try:
+        return json.loads(blob)
+    except json.JSONDecodeError:
+        # riparazione leggera dell'errore LLM piu' comune: virgola finale prima
+        # di } o ]. Se non basta, l'eccezione si propaga (gestita a monte con
+        # una richiesta di autocorrezione al planner).
+        return json.loads(re.sub(r",(\s*[}\]])", r"\1", blob))
 
 
 # classe client iniettabile (i test ne passano una finta; a runtime e' l'SDK)
@@ -327,11 +337,11 @@ async def generate_plan(conversation_id: str, repo_path: str,
         opts.system_prompt = VIA_SYSTEM   # inietta il contratto d'output del VIA
         return opts
 
-    async def _run(resume):
+    async def _run(resume, query):
         raw_text: list[str] = []
         cost = 0.0
         async with _get_client_cls()(options=_options(resume)) as client:
-            await client.query(via_query)
+            await client.query(query)
             async for msg in client.receive_response():
                 if type(msg).__name__ == "AssistantMessage":
                     for block in getattr(msg, "content", []) or []:
@@ -346,12 +356,12 @@ async def generate_plan(conversation_id: str, repo_path: str,
         return raw_text, cost
 
     try:
-        raw_text, cost = await _run(resume_session)
+        raw_text, cost = await _run(resume_session, via_query)
     except Exception as e:  # noqa: BLE001
         # sessione da riprendere non piu' valida: riparti da zero, una volta sola
         if resume_session and _is_resume_failure(e):
             log.warning("resume del VIA fallito (%s); riparto senza sessione", e)
-            raw_text, cost = await _run(None)
+            raw_text, cost = await _run(None, via_query)
         else:
             raise
 
@@ -364,10 +374,34 @@ async def generate_plan(conversation_id: str, repo_path: str,
     try:
         data = _extract_json(joined)
     except (ValueError, json.JSONDecodeError) as e:
-        log.warning("VIA: JSON non estraibile. Testo del planner:\n%s", joined[:2000])
-        raise PlanValidationError(
-            f"Il planner non ha risposto in JSON ({e}). Anteprima: "
-            f"{joined[:300]!r}. Riprova chiedendo in chat un piano piu' concreto.")
+        # AUTOCORREZIONE: il JSON grande del planner spesso ha piccoli difetti
+        # (virgolette non escappate, newline reali nelle stringhe). Invece di
+        # scaricare tutto sull'utente, rimandiamo l'output al planner e gli
+        # chiediamo di restituirlo come JSON valido: i modelli sono bravissimi.
+        log.warning("VIA: JSON non valido (%s); chiedo autocorrezione al planner", e)
+        fix_query = (
+            "Il JSON che hai appena prodotto NON e' sintatticamente valido "
+            f"(errore del parser: {e}).\n"
+            "Ecco ESATTAMENTE cosa hai prodotto, tra i marcatori <<< e >>>:\n"
+            f"<<<\n{joined[:14000]}\n>>>\n"
+            "Restituiscilo di nuovo come UN SOLO oggetto JSON VALIDO e COMPLETO "
+            "che rappresenti lo stesso PlanDocument. Correggi gli errori di "
+            "sintassi: virgolette interne da escappare (\\\"), newline dentro le "
+            "stringhe scritti come \\n, nessuna virgola finale. NIENTE fence "
+            "markdown, NIENTE testo attorno: solo il JSON."
+        )
+        fix_text, fix_cost = await _run(None, fix_query)
+        cost += fix_cost
+        joined2 = "".join(fix_text).strip()
+        try:
+            data = _extract_json(joined2)
+        except (ValueError, json.JSONDecodeError) as e2:
+            log.warning("VIA: JSON non estraibile neanche dopo autocorrezione. "
+                        "Testo del planner:\n%s", joined[:2000])
+            raise PlanValidationError(
+                f"Il planner non e' riuscito a produrre un piano in JSON valido "
+                f"({e2}). Prova a descrivere in chat una feature piu' piccola e "
+                f"concreta, poi ripremi VIA.")
     # FORZA il repo_path al progetto scelto: il planner tende a inventarne uno
     # (es. C:\Users\...\Documents\Progetto) che cade fuori dalle root e fa fallire
     # tutto. E' l'utente col progetto a decidere DOVE si scrive, non il planner.
