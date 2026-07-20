@@ -16,7 +16,7 @@ from fastapi.templating import Jinja2Templates
 from .config import get_settings
 from .db import init_db
 from .security import IdentityMiddleware
-from .routes import chat, plans, runs, approvals as approvals_route, push as push_route, stats as stats_route, ui, projects as projects_route, ollama as ollama_route, lifecycle as lifecycle_route
+from .routes import chat, plans, runs, approvals as approvals_route, push as push_route, stats as stats_route, ui, projects as projects_route, ollama as ollama_route, lifecycle as lifecycle_route, documents as documents_route
 
 HERE = Path(__file__).parent
 STATIC = HERE / "static"
@@ -29,15 +29,25 @@ templates = Jinja2Templates(directory=str(TEMPLATES))
 async def lifespan(app: FastAPI):
     settings = get_settings()
     settings.artifacts_dir.mkdir(parents=True, exist_ok=True)
+    # document_root e' la casa di default dei progetti (§A.2): creala all'avvio.
+    # Tollerante: se fallisce (es. path Windows su Linux/CI) logga e prosegui.
+    try:
+        settings.document_root.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        log.warning("Impossibile creare document_root (%s): %s",
+                    settings.document_root, e)
     init_db(settings.db_path)
     _sanity_checks(settings)
     yield
 
 
 def _sanity_checks(settings) -> None:
-    if not settings.repo_roots:
-        log.warning("ARGO_ROOTS vuoto: ogni Write/Bash sara' NEGATO (regola 4.3). "
-                    "Configura le root su cui gli agenti possono operare.")
+    # ARGO_ROOTS vuoto NON e' piu' un problema: document_root e' sempre una root
+    # valida (§A.1). Avvisa invece se document_root non e' creabile/scrivibile.
+    if not settings.document_root.exists():
+        log.warning("document_root (%s) non esiste e non e' stata creata: chat/piani/"
+                    "documenti potrebbero non funzionare. Controlla ARGO_DOCUMENT_ROOT.",
+                    settings.document_root)
     if not settings.vapid_keys_path.exists():
         log.warning("vapid_keys.json assente (%s): niente push al telefono "
                     "(regola 4.16). Esegui gates/gate0_push/gen_vapid.py.",
@@ -55,6 +65,7 @@ def create_app() -> FastAPI:
 
     app.include_router(ui.router)
     app.include_router(projects_route.router)
+    app.include_router(documents_route.router)
     app.include_router(chat.router)
     app.include_router(plans.router)
     app.include_router(runs.router)

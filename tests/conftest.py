@@ -22,9 +22,16 @@ def roots(tmp_path) -> list[Path]:
 
 @pytest.fixture
 def settings(tmp_path, roots) -> config.Settings:
+    # document_root/self_root a tmp dir: MAI il path Windows reale (§Test).
+    document_root = tmp_path / "document"
+    document_root.mkdir()
+    self_root = tmp_path / "self"
+    self_root.mkdir()
     s = config.Settings(
         db_path=tmp_path / "argo.db",
         repo_roots=[str(roots[0])],
+        document_root=document_root,
+        self_root=self_root,
         approval_timeout_s=2,
         vapid_keys_path=tmp_path / "nope.json",   # niente push nei test
         dev_allow_no_identity=True,

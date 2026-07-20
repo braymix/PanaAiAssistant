@@ -122,8 +122,17 @@ def test_cancel_task_kills_verify_subprocess(db, settings, roots):
         run_task = asyncio.ensure_future(pool.approve_and_run(plan_id))
 
         await _wait_status(db, t1, "verifying")
-        # il Popen del verify e' registrato ed e' vivo
-        proc = pool._verify_procs.get(t1)
+        # il Popen del verify e' registrato ed e' vivo. La registrazione in
+        # _verify_procs avviene subito DOPO il passaggio a 'verifying': sotto
+        # carico c'e' un piccolo scarto, quindi attendi la comparsa del Popen.
+        proc = None
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + 5.0
+        while loop.time() < deadline:
+            proc = pool._verify_procs.get(t1)
+            if proc is not None:
+                break
+            await asyncio.sleep(0.02)
         assert proc is not None and proc.poll() is None
 
         await pool.cancel_task(t1)

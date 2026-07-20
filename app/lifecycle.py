@@ -18,6 +18,8 @@ from .db import Database, utcnow
 
 # stati che indicano "lavoro in esecuzione": vietano delete/purge (§B.3).
 ACTIVE_TASK_STATES = ("running", "verifying", "escalated")
+# un run "vivo": non si elimina finche' gira (prima STOP, poi delete).
+RUN_ACTIVE_STATES = ("running",)
 
 
 class LifecycleConflict(Exception):
@@ -100,6 +102,20 @@ def purge_plan(db: Database, plan_id: str) -> None:
     _purge_runs_and_events(db, [t["id"] for t in task_rows])
     db.execute("DELETE FROM task WHERE plan_id=?", (plan_id,))
     db.execute("DELETE FROM plan_document WHERE id=?", (plan_id,))
+
+
+def delete_run(db: Database, run_id: str) -> None:
+    """Elimina un singolo run: le sue righe di `event` e `approval`, poi il run.
+
+    Il run non ha `deleted_at` (e' log-like): l'eliminazione e' hard e DELIBERATA
+    (§B.6.4, come il purge). Guardia: un run 'running' non si elimina — prima si
+    ferma (STOP), poi lo si elimina -> LifecycleConflict (HTTP 409)."""
+    row = db.query_one("SELECT status FROM run WHERE id=?", (run_id,))
+    if row and row["status"] in RUN_ACTIVE_STATES:
+        raise LifecycleConflict("ferma prima il run (STOP), poi eliminalo")
+    db.execute("DELETE FROM event WHERE run_id=?", (run_id,))
+    db.execute("DELETE FROM approval WHERE run_id=?", (run_id,))
+    db.execute("DELETE FROM run WHERE id=?", (run_id,))
 
 
 def purge_conversation(db: Database, conversation_id: str) -> None:

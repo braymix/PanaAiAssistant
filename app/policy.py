@@ -57,9 +57,41 @@ def is_dangerous_bash(command: str) -> bool:
     return any(p.search(command) for p in _DANGEROUS)
 
 
+# File di sicurezza del progetto "se stesso" (Addendum §4): toccarli non e' mai
+# auto-allow, nemmeno dentro files_allowed. Percorsi RELATIVI a self_root.
+SELF_PROTECTED = (
+    "app/security.py",
+    "app/policy.py",
+    "app/config.py",
+    "app/backends.py",
+    ".claude",   # tutta la cartella .claude/
+)
+
+
+def _is_self_protected(resolved: Path, self_root: Path | None) -> bool:
+    """True se `resolved` cade dentro self_root E combacia con SELF_PROTECTED
+    (un file esatto o qualsiasi cosa dentro una cartella protetta)."""
+    if self_root is None:
+        return False
+    try:
+        rel = resolved.relative_to(self_root)
+    except ValueError:
+        return False
+    rel_posix = rel.as_posix()
+    for pat in SELF_PROTECTED:
+        if rel_posix == pat or rel_posix.startswith(pat + "/"):
+            return True
+    return False
+
+
 def evaluate(tool_name: str, tool_input: dict, files_allowed: set[Path],
-             roots: list[Path], bash_allowlist: list[str]) -> tuple[str, str]:
-    """Ritorna ('allow'|'deny'|'ask', motivo). Nessun effetto collaterale."""
+             roots: list[Path], bash_allowlist: list[str],
+             self_root: Path | None = None, self_protect: bool = False) -> tuple[str, str]:
+    """Ritorna ('allow'|'deny'|'ask', motivo). Nessun effetto collaterale.
+
+    Se `self_protect` e' attivo e il path risolto e' un file sensibile di Argo
+    dentro `self_root` (SELF_PROTECTED), il verdetto e' sempre 'ask' anche se il
+    file e' nel perimetro `files_allowed` (Addendum §4)."""
     if tool_name in ("Write", "Edit"):
         raw = tool_input.get("file_path")
         if not raw:
@@ -68,6 +100,9 @@ def evaluate(tool_name: str, tool_input: dict, files_allowed: set[Path],
             resolved = resolve_within_roots(raw, roots)
         except PathNotAllowed as e:
             return "deny", f"path fuori dalle root consentite: {e}"
+        # guard "se stesso": i file di sicurezza di Argo non sono mai auto-allow.
+        if self_protect and _is_self_protected(resolved, self_root):
+            return "ask", f"file sensibile di Argo (progetto se stesso): {resolved}"
         if resolved in files_allowed:
             return "allow", "dentro il perimetro approvato col VIA"
         return "ask", f"file fuori dal perimetro del piano: {resolved}"
@@ -96,6 +131,8 @@ def make_policy_gate(ctx: GateContext):
         verdict, reason = evaluate(
             tool_name, input_data, ctx.files_allowed_resolved,
             ctx.roots, settings.bash_allowlist,
+            self_root=settings.self_root.resolve(),
+            self_protect=settings.self_protect,
         )
 
         if verdict == "allow":

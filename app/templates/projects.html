@@ -6,10 +6,15 @@
 <h3>Repo disponibili</h3>
 <div class="repos" id="repos">
   {% for p in projects %}
-  <button type="button" class="repo-row" data-repo="{{ p['repo_path'] }}">
+  <button type="button" class="repo-row{% if p.get('pinned') %} pinned{% endif %}"
+          data-repo="{{ p['repo_path'] }}" data-kind="{{ p.get('kind', 'user') }}">
     <span class="radio"></span>
     <span class="rinfo">
-      <span class="rname">{{ p['name'] }}</span>
+      <span class="rname">
+        {{ p['name'] }}
+        {% if p.get('kind') == 'default' %}<span class="tag tag-default">default</span>
+        {% elif p.get('kind') == 'self' %}<span class="tag tag-self">se stesso</span>{% endif %}
+      </span>
       <span class="rpath">{{ p['repo_path'] }}</span>
     </span>
   </button>
@@ -19,10 +24,11 @@
 </div>
 
 <h3>Nuovo progetto</h3>
+<p class="hint">Basta il nome: il progetto vive dentro la cartella Documenti. Il path è opzionale.</p>
 <div class="form-col">
   <input id="p-name" class="inp" placeholder="nome" />
-  <input id="p-repo" class="inp" placeholder="repo_path (dentro una root)" />
-  <button class="btn ghost" id="add-project">Aggiungi repo</button>
+  <input id="p-repo" class="inp" placeholder="cartella (opzionale, dentro Documenti)" />
+  <button class="btn ghost" id="add-project">Aggiungi progetto</button>
 </div>
 {% endblock %}
 
@@ -31,9 +37,11 @@
   document.getElementById('add-project').onclick = Argo.addProject;
 
   // selezione repo attivo: persiste in localStorage, usato dalle nuove chat.
+  // Default preselezionato = Documenti (prima voce, kind=default).
   (function () {
     const rows = [...document.querySelectorAll('.repo-row')];
-    const current = localStorage.getItem('argo_repo') || '';
+    let current = localStorage.getItem('argo_repo') || '';
+    if (!current && rows.length) current = rows[0].dataset.repo;   // Documenti
     const mark = (repo) => rows.forEach((r) =>
       r.classList.toggle('sel', r.dataset.repo === repo));
     mark(current);

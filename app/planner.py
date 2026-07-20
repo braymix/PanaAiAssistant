@@ -130,13 +130,22 @@ def _basename_if_absolute(f: str) -> str:
 
 
 def _safe_cwd(repo_cwd: str, settings) -> str:
-    """Ritorna una working dir valida e dentro le root; altrimenti '.' (app dir)."""
+    """Ritorna una working dir valida e dentro le root; altrimenti ripiega su
+    document_root (§A.4), non su '.' (app dir). Cosi' chat e piani senza progetto
+    esplicito lavorano dentro `document`, non nella cartella dell'app."""
     roots = settings.resolved_roots()
     try:
-        resolved = resolve_within_roots(repo_cwd or ".", roots)
+        resolved = resolve_within_roots(repo_cwd or str(settings.document_root), roots)
         resolved.mkdir(parents=True, exist_ok=True)
         return str(resolved)
     except (PathNotAllowed, OSError):
+        pass
+    # fallback: document_root, creata se manca. Ultimo ripiego "." solo se
+    # nemmeno document_root e' utilizzabile (path Windows su CI senza override).
+    try:
+        settings.document_root.mkdir(parents=True, exist_ok=True)
+        return str(settings.document_root.resolve())
+    except OSError:
         return "."
 
 

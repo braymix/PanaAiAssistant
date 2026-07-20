@@ -143,6 +143,36 @@ class Settings:
     # DEVE cadere sotto una di queste, risolto, senza symlink-escape/UNC/'..'.
     repo_roots: list[str] = field(default_factory=lambda: _env_list("ARGO_ROOTS"))
 
+    # --- root dei documenti: casa di default di TUTTI i progetti ----------------
+    # E' SEMPRE una root valida (cfr. resolved_roots): cosi' anche con ARGO_ROOTS
+    # vuoto non e' "tutto negato". L'utente non digita mai questo path.
+    document_root: Path = Path(os.environ.get(
+        "ARGO_DOCUMENT_ROOT",
+        r"C:\Users\miche\Desktop\assistant\document",
+    ))
+
+    # --- root del sorgente di Argo (progetto "se stesso"). Default: auto-rilevata
+    # dalla posizione del codice, cosi' segue l'app se la sposti. Override con
+    # ARGO_SELF_ROOT. Sulla macchina dell'utente risolve a:
+    # C:\Users\miche\Desktop\assistant\PanaAiAssistant
+    self_root: Path = Path(os.environ.get(
+        "ARGO_SELF_ROOT",
+        str(Path(__file__).resolve().parents[1]),   # <repo>/app/config.py -> <repo>
+    ))
+
+    # --- servizio Documenti: config del browser file (missione Documenti) -------
+    # cap sull'anteprima inline dei .md; oltre -> solo download.
+    docs_max_preview_bytes: int = int(
+        os.environ.get("ARGO_DOCS_MAX_PREVIEW_BYTES", str(1_048_576)))
+    # deep link Obsidian: nome del vault come configurato sul telefono, e la
+    # sottocartella di document_root che e' la radice del vault ("" = document_root).
+    obsidian_vault: str = os.environ.get("ARGO_OBSIDIAN_VAULT", "")
+    obsidian_vault_subpath: str = os.environ.get("ARGO_OBSIDIAN_VAULT_SUBPATH", "")
+
+    # --- guard sul progetto "se stesso": i file di sicurezza di Argo non sono mai
+    # auto-allow, richiedono un OK esplicito dal telefono (§8). 0 = mano libera.
+    self_protect: bool = os.environ.get("ARGO_SELF_PROTECT", "1") != "0"
+
     # --- executor locale (§1.9, GATE 2) -----------------------------------------
     max_local_concurrency: int = int(os.environ.get("ARGO_MAX_CONCURRENCY", "3"))
     max_local_retries: int = int(os.environ.get("ARGO_MAX_RETRIES", "2"))
@@ -216,7 +246,17 @@ class Settings:
     vapid_sub: str = os.environ.get("ARGO_VAPID_SUB", "mailto:argo@localhost")
 
     def resolved_roots(self) -> list[Path]:
-        return [Path(r).resolve() for r in self.repo_roots]
+        """Le root note (document_root + self_root, in testa) piu' le eventuali
+        ARGO_ROOTS extra, deduplicate. document_root e' SEMPRE presente: cosi'
+        anche con ARGO_ROOTS vuoto non e' "tutto negato" (§A.1). self_root e' la
+        scelta extra "se stesso" (Addendum), non la destinazione di default."""
+        known = [self.document_root.resolve(), self.self_root.resolve()]
+        extra = [Path(r).resolve() for r in self.repo_roots]
+        out: list[Path] = []
+        for p in known + extra:
+            if p not in out:
+                out.append(p)
+        return out
 
 
 _settings: Settings | None = None

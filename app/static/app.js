@@ -31,7 +31,7 @@ const Argo = (() => {
      'approval_requested', 'approval_resolved', 'plan_done', 'error', 'chat_delta',
      'route_decision', 'config_warning', 'task_cancelled', 'plan_cancelled',
      'queue_paused', 'queue_resumed', 'task_blocked', 'task_unblocked',
-     'conversation_deleted', 'plan_deleted', 'task_deleted',
+     'conversation_deleted', 'plan_deleted', 'task_deleted', 'run_deleted',
      'conversation_purged', 'plan_purged']
       .forEach((k) => es.addEventListener(k, (e) => onEvent({ kind: k, data: e.data })));
     return es;
@@ -144,6 +144,40 @@ const Argo = (() => {
     jpost('/conversations/' + id + '/purge', { confirm: true });
   const pauseQueue = () => jpost('/queue/pause', {});
   const resumeQueue = () => jpost('/queue/resume', {});
+  const stopRun = (id) => jpost('/runs/' + id + '/stop', {});
+  const deleteRun = (id) => jsend('DELETE', '/runs/' + id);
+
+  // STOP + elimina un run dalla lista/dettaglio. Se backHref e' dato, naviga li'
+  // dopo l'eliminazione; altrimenti rimuove la riga [data-run] dal DOM.
+  async function runAction(action, runId, backHref) {
+    try {
+      if (action === 'stop') {
+        if (!confirm('Fermare questo run?')) return;
+        await stopRun(runId);
+        return;
+      }
+      if (action === 'delete') {
+        if (!confirm('Eliminare questo run? (rimuove log ed eventi, irreversibile)')) return;
+        await deleteRun(runId);
+        if (backHref) { location.href = backHref; return; }
+        const li = document.querySelector('[data-run="' + runId + '"]');
+        if (li) li.remove();
+      }
+    } catch (e) { alert(e.message); }
+  }
+
+  // elimina un piano dalla lista (soft-delete) senza aprirlo.
+  async function planListAction(action, planId) {
+    try {
+      if (action === 'cancel') { await cancelPlan(planId); return; }
+      if (action === 'delete') {
+        if (!confirm('Eliminare il piano? (reversibile, resta nel log)')) return;
+        await softDeletePlan(planId);
+        const li = document.querySelector('[data-plan="' + planId + '"]');
+        if (li) li.remove();
+      }
+    } catch (e) { alert(e.message); }
+  }
 
   // toggle globale di pausa coda: aggiorna il bottone dallo stato reale (/queue)
   async function wireQueuePause(btnId) {
@@ -213,10 +247,11 @@ const Argo = (() => {
 
   async function addProject() {
     const name = document.getElementById('p-name').value.trim();
+    // repo_path e' opzionale (§A.3): senza, il progetto vive in document_root/name.
     const repo = document.getElementById('p-repo').value.trim();
-    if (!name || !repo) { alert('nome e repo_path richiesti'); return; }
+    if (!name) { alert('il nome e\' richiesto'); return; }
     try {
-      await jpost('/projects', { name, repo_path: repo });
+      await jpost('/projects', { name, repo_path: repo || null });
       location.reload();
     } catch (e) { alert(e.message); }
   }
@@ -368,5 +403,6 @@ const Argo = (() => {
            streamOllamaLogs, pollOllamaPs, deleteChat,
            cancelPlan, cancelTask, blockTask, unblockTask,
            softDeletePlan, softDeleteConversation, purgePlan, purgeConversation,
-           pauseQueue, resumeQueue, wireQueuePause, taskAction, planDanger };
+           pauseQueue, resumeQueue, wireQueuePause, taskAction, planDanger,
+           stopRun, deleteRun, runAction, planListAction };
 })();

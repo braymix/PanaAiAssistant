@@ -78,6 +78,11 @@
       <span class="ic-chip"><svg class="ic" aria-hidden="true"><use href="/static/icons.svg#ic-folder" /></svg></span>
       <span class="txt"><span class="t">Progetti</span><span class="s">repo dentro le root</span></span>
     </a>
+
+    <a class="tile cat-teal" href="/documents">
+      <span class="ic-chip"><svg class="ic" aria-hidden="true"><use href="/static/icons.svg#ic-folder" /></svg></span>
+      <span class="txt"><span class="t">Documenti</span><span class="s">naviga i file, apri in Obsidian</span></span>
+    </a>
   </div>
 </section>
 
@@ -89,7 +94,7 @@
   </div>
   <div class="recent">
     {% for c in conversations %}
-    <a class="recent-row" href="/chat/{{ c['id'] }}">
+    <a class="recent-row" href="/chat/{{ c['id'] }}" data-conv="{{ c['id'] }}">
       <span class="emoji">{% if c['mode'] == 'research' %}🔎{% else %}💬{% endif %}</span>
       <span class="rt">{{ c['title'] }}</span>
       <span class="time">{{ c['created_at'][11:16] if c['created_at'] else '' }}</span>
@@ -97,6 +102,8 @@
       {% if st in ('executing', 'running') %}<span class="chip-s chip-run">in corso</span>
       {% elif st == 'done' %}<span class="chip-s chip-done">done</span>
       {% elif st in ('failed', 'escalated') %}<span class="chip-s chip-esc">esc</span>{% endif %}
+      <button class="row-del" aria-label="Elimina chat"
+              onclick="Argo.deleteChat('{{ c['id'] }}', event)">🗑</button>
     </a>
     {% else %}
     <div class="empty">Nessuna conversazione.</div>

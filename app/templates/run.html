@@ -20,6 +20,17 @@
   <div class="run-cursor">● in esecuzione<span class="blink">_</span></div>
   {% endif %}
 </div>
+
+<!-- controllo completo (§B.5): ferma il run in corso, elimina il run -->
+<section class="danger-zone">
+  <div class="section-label">Gestione run</div>
+  <div class="dz-row">
+    {% if run['status'] == 'running' %}
+    <button class="btn ghost" onclick="Argo.runAction('stop', '{{ run['id'] }}')">■ Ferma</button>
+    {% endif %}
+    <button class="btn ghost" onclick="Argo.runAction('delete', '{{ run['id'] }}', '/runs')">🗑 Elimina run</button>
+  </div>
+</section>
 {% endif %}
 {% endblock %}
 

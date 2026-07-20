@@ -84,8 +84,10 @@ async def chat_page(request: Request, conversation_id: str):
     msgs = db.query(
         "SELECT * FROM message WHERE conversation_id=? ORDER BY id ASC",
         (conversation_id,))
-    # repo_path viaggia via query param (?repo=): conversation §5.1 non ha la colonna
-    repo = request.query_params.get("repo", "")
+    # repo_path viaggia via query param (?repo=): conversation §5.1 non ha la colonna.
+    # Default (§A.4): document_root, cosi' l'utente non incolla mai il path.
+    from ..config import get_settings
+    repo = request.query_params.get("repo") or str(get_settings().document_root)
     return templates.TemplateResponse(request, "chat.html", {
         "request": request, "conversation": conv, "messages": msgs, "repo": repo,
     })
@@ -108,6 +110,13 @@ async def plan_page(request: Request, plan_id: str):
 @router.get("/ollama", response_class=HTMLResponse)
 async def ollama_page(request: Request):
     return templates.TemplateResponse(request, "ollama.html", {"request": request})
+
+
+@router.get("/documents", response_class=HTMLResponse)
+async def documents_page(request: Request):
+    """Navigatore mobile-first della cartella `document` (§B.5). I dati arrivano
+    via fetch da /documents/tree; il deep link Obsidian da /documents/config."""
+    return templates.TemplateResponse(request, "documents.html", {"request": request})
 
 
 @router.get("/runs/{run_id}", response_class=HTMLResponse)

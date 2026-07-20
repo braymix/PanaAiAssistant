@@ -29,6 +29,7 @@ def test_direct_hit_without_identity_rejected(db, settings):
     """
     strict = config.Settings(
         db_path=settings.db_path, repo_roots=settings.repo_roots,
+        document_root=settings.document_root, self_root=settings.self_root,
         dev_allow_no_identity=False,
     )
     config.set_settings(strict)
@@ -47,7 +48,9 @@ def test_project_create_validates_root(client, roots):
     good.mkdir()
     r = client.post("/projects", json={"name": "A", "repo_path": str(good)})
     assert r.status_code == 200
-    assert client.get("/projects").json()[0]["name"] == "A"
+    # in cima ci sono le due voci implicite pinnate; il progetto creato le segue.
+    names = [p["name"] for p in client.get("/projects").json()]
+    assert "A" in names
 
 
 def test_project_outside_root_rejected(client, tmp_path):
