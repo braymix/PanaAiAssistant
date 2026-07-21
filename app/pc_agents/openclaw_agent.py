@@ -56,6 +56,20 @@ class OpenClawAgent(PcAgent):
         return d
 
     async def start(self) -> bool:
+        # guardia: se OpenClaw non e' installato, `openclaw gateway` fallirebbe con
+        # un criptico WinError 2 ("file non trovato"). Meglio un messaggio chiaro.
+        settings = get_settings()
+        if not await openclaw_setup.ensure_installed(settings):
+            import time as _t
+            from ..events import get_bus
+            await get_bus().emit(None, "openclaw_log", {
+                "line": "[argo] OpenClaw non installato. In un terminale lancia: "
+                        "npm install -g openclaw  (serve Node.js). Poi premi "
+                        "prima 'Setup', poi 'Avvia'.",
+                "level": "error", "timestamp": _t.time()})
+            await get_bus().emit(None, "openclaw_status_change",
+                                 {"from": "stopped", "to": "not_installed"})
+            return False
         return await self._process().start()
 
     async def stop(self) -> bool:
