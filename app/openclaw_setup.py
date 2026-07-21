@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -154,20 +155,100 @@ async def check_status(settings) -> OpenClawStatus:
     )
 
 
-async def ensure_installed(settings) -> bool:
-    """Verifica che openclaw sia installato globalmente via npm.
+async def _log_line(line: str, level: str = "info") -> None:
+    """Pubblica una riga sul bus come `openclaw_log`, cosi' compare nel log live
+    della dashboard esattamente come l'output del gateway."""
+    from .events import get_bus
+    await get_bus().emit(None, "openclaw_log",
+                         {"line": line, "level": level, "timestamp": time.time()})
 
-    Se NON lo e', non lo installa: ritorna False e logga le istruzioni (l'utente
-    fa `npm install -g openclaw` una volta sola). Idempotente."""
+
+async def _npm_install(settings) -> tuple[bool, str | None]:
+    """SCARICA e installa OpenClaw (`npm install -g openclaw` per default).
+
+    Streamma l'output riga per riga come eventi `openclaw_log`. Non solleva:
+    ritorna (successo, errore). Il comando e' configurabile
+    (ARGO_OPENCLAW_INSTALL_CMD) e ha un timeout (ARGO_OPENCLAW_INSTALL_TIMEOUT_S).
+    """
+    cmd = (settings.openclaw_install_cmd or "").strip() or "npm install -g openclaw"
+    timeout = max(30, int(settings.openclaw_install_timeout_s or 600))
+    await _log_line(f"[argo] scarico e installo OpenClaw: {cmd}")
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+    except (OSError, ValueError) as e:
+        return False, str(e)
+
+    async def _pump() -> None:
+        assert proc.stdout is not None
+        while True:
+            raw = await proc.stdout.readline()
+            if not raw:
+                break
+            line = raw.decode("utf-8", "replace").rstrip("\n")
+            if line:
+                await _log_line(line)
+
+    try:
+        await asyncio.wait_for(_pump(), timeout=timeout)
+        rc = await asyncio.wait_for(proc.wait(), timeout=30)
+    except asyncio.TimeoutError:
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        return False, f"timeout dopo {timeout}s"
+    except OSError as e:  # noqa: BLE001
+        return False, str(e)
+    if rc == 0:
+        return True, None
+    return False, f"exit code {rc}"
+
+
+async def ensure_installed(settings) -> bool:
+    """Assicura che openclaw sia installato globalmente via npm.
+
+    Se manca e l'auto-download e' attivo (default), lo SCARICA con
+    `npm install -g openclaw` e ri-verifica. Con auto-download spento, si limita a
+    loggare le istruzioni per l'installazione manuale. Idempotente."""
     installed, version = await _run_version()
     if installed:
         log.info("OpenClaw gia' installato (%s).", version or "versione ignota")
         return True
-    log.warning(
-        "OpenClaw NON installato. Installalo una volta sola con:\n"
-        "    npm install -g openclaw\n"
-        "poi ripremi 'Setup' dalla dashboard.")
-    return False
+
+    if not getattr(settings, "openclaw_auto_install", True):
+        log.warning(
+            "OpenClaw NON installato (auto-download disattivato). Installalo con:\n"
+            "    npm install -g openclaw\n"
+            "poi ripremi 'Setup' dalla dashboard.")
+        await _log_line(
+            "[argo] OpenClaw non installato. Auto-download OFF: "
+            "installa a mano con `npm install -g openclaw`.", level="error")
+        return False
+
+    log.info("OpenClaw non installato: avvio auto-download.")
+    ok, err = await _npm_install(settings)
+    if not ok:
+        log.warning(
+            "Auto-download OpenClaw fallito (%s). Installa a mano: "
+            "npm install -g openclaw", err)
+        await _log_line(
+            f"[argo] auto-download fallito: {err}. "
+            "Prova a mano: `npm install -g openclaw`.", level="error")
+        return False
+
+    installed, version = await _run_version()
+    if installed:
+        log.info("OpenClaw installato (%s).", version or "ok")
+        await _log_line(f"[argo] OpenClaw installato ({version or 'ok'}).")
+    else:
+        await _log_line(
+            "[argo] installazione terminata ma `openclaw --version` non risponde: "
+            "controlla il PATH di npm (bin globale).", level="error")
+    return installed
 
 
 async def setup_workspace(settings) -> Path:

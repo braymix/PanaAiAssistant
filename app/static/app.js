@@ -574,7 +574,7 @@ const Argo = (() => {
     if ($('ag-start')) $('ag-start').onclick = () => act('start', 'Avviato');
     if ($('ag-stop')) $('ag-stop').onclick = () => act('stop', 'Fermato');
     if ($('ag-restart')) $('ag-restart').onclick = () => act('restart', 'Riavviato');
-    if ($('ag-setup')) $('ag-setup').onclick = () => ocPost('/openclaw/setup', {}, 'Setup eseguito');
+    if ($('ag-setup')) $('ag-setup').onclick = () => ocPost('/openclaw/setup', {}, 'Scaricato & configurato (vedi log)');
     if ($('ag-sync')) $('ag-sync').onclick = async () => {
       const r = await ocPost('/openclaw/config/sync', {}, null);
       if (r) toast(r.n_models + ' modelli sincronizzati');

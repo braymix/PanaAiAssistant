@@ -283,6 +283,16 @@ class Settings:
         os.environ.get("ARGO_OPENCLAW_GATEWAY_PORT", "8766"))
     openclaw_max_concurrent: int = int(
         os.environ.get("ARGO_OPENCLAW_MAX_CONCURRENT", "2"))
+    # SCARICA OpenClaw da solo al primo "Setup" se manca (npm install -g openclaw),
+    # cosi' l'utente non deve toccare il terminale. Mettilo a 0 per tornare al
+    # comportamento "verifica e basta" (richiede install manuale).
+    openclaw_auto_install: bool = (
+        os.environ.get("ARGO_OPENCLAW_AUTO_INSTALL", "1") != "0")
+    # comando usato per l'auto-download. Vuoto = "npm install -g openclaw".
+    openclaw_install_cmd: str = os.environ.get("ARGO_OPENCLAW_INSTALL_CMD", "")
+    # timeout (s) dell'auto-download: npm -g puo' metterci un po'.
+    openclaw_install_timeout_s: int = int(
+        os.environ.get("ARGO_OPENCLAW_INSTALL_TIMEOUT_S", "600"))
 
     def resolved_roots(self) -> list[Path]:
         """Le root note (document_root + self_root, in testa) piu' le eventuali
