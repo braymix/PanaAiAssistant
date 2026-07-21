@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS project(
 
 CREATE TABLE IF NOT EXISTS conversation(
   id TEXT PRIMARY KEY, title TEXT, plan_mode INTEGER, created_at TEXT,
-  mode TEXT DEFAULT 'generic',     -- 'generic' | 'research'
+  mode TEXT DEFAULT 'claudio_codice',  -- unica modalita' chat: "Claudio Codice"
   deleted_at TEXT                  -- soft-delete (ciclo di vita §B.3)
 );
 
@@ -105,7 +105,7 @@ class Database:
         cols = [r["name"] for r in self.query("PRAGMA table_info(conversation)")]
         if "mode" not in cols:
             self.execute(
-                "ALTER TABLE conversation ADD COLUMN mode TEXT DEFAULT 'generic'")
+                "ALTER TABLE conversation ADD COLUMN mode TEXT DEFAULT 'claudio_codice'")
 
         # --- autofix (missione autofix): traccia round e diagnosi sul task e la
         #     classe di fallimento per-tentativo sul run (append-only).

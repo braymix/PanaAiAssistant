@@ -33,10 +33,15 @@ async def dashboard(request: Request):
         "SELECT COUNT(*) c FROM run WHERE status='running'")["c"]
     pending_count = db.query_one(
         "SELECT COUNT(*) c FROM approval WHERE status='pending'")["c"]
+    # agenti PC registrati (§C.5): la sezione "PC Agenti" li itera. Lo stato live
+    # (🔴/🟢/⚠️) lo aggiorna il client via /agents; qui solo nome/icona/descrizione.
+    from ..pc_agents import registry
+    agents = [{"name": a.name, "icon": a.icon, "description": a.description}
+              for a in registry.all_agents()]
     return templates.TemplateResponse(request, "dashboard.html", {
         "request": request, "conversations": convs,
         "draft_plans": draft_plans, "active_runs": active_runs,
-        "pending_count": pending_count,
+        "pending_count": pending_count, "agents": agents,
         "user": getattr(request.state, "user", "?"),
     })
 
@@ -110,6 +115,30 @@ async def plan_page(request: Request, plan_id: str):
 @router.get("/ollama", response_class=HTMLResponse)
 async def ollama_page(request: Request):
     return templates.TemplateResponse(request, "ollama.html", {"request": request})
+
+
+@router.get("/openclaw", response_class=HTMLResponse)
+async def openclaw_page(request: Request):
+    """Pagina dedicata OpenClaw (§B.6). Alias comodo di /agents/openclaw."""
+    return _agent_page(request, "openclaw")
+
+
+@router.get("/agents/{name}", response_class=HTMLResponse)
+async def agent_page(request: Request, name: str):
+    """Pagina generica di un agente PC (§C.5)."""
+    return _agent_page(request, name)
+
+
+def _agent_page(request: Request, name: str) -> HTMLResponse:
+    from ..pc_agents import registry
+    agent = registry.get(name)
+    meta = None
+    if agent is not None:
+        meta = {"name": agent.name, "icon": agent.icon,
+                "description": agent.description}
+    return templates.TemplateResponse(request, "openclaw.html", {
+        "request": request, "agent": meta, "name": name,
+    })
 
 
 @router.get("/documents", response_class=HTMLResponse)

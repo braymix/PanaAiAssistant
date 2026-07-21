@@ -139,3 +139,43 @@ pytest -q                 # 59 test, tutti verdi
 - **Planner non risponde / errore CLI**: `claude` non installato o non loggato.
 - **Executor che loopa**: `OLLAMA_CONTEXT_LENGTH` troppo basso, o modello debole
   di tool-use (§1.9) → è esattamente ciò che il GATE 2 serve a scoprire.
+
+---
+
+## Nota: rinomina "Chat generica" → "Claudio Codice"
+
+La vecchia "Chat generica" ora si chiama **Claudio Codice** (nome proprio,
+gioco di parole "Claude" + "codice"). La funzionalità è identica — chat in plan
+mode collegata al progetto —, cambia solo il nome. Identificatore interno:
+`claudio_codice`. La vecchia modalità "ricerca online" (web search) è stata
+**rimossa completamente** (UI + backend): il modulo OpenClaw copre ora l'accesso
+al web.
+
+## Modulo OpenClaw ("PC Agente")
+
+OpenClaw è un agente PC che gira come **processo separato**, **fuori** dal
+perimetro di sicurezza di Argo (nessun PolicyGate: accesso totale a shell, file e
+web). Argo lo avvia/ferma/configura e ne mostra stato e log in dashboard, ma non
+gli impone approvazioni. È **on-demand**: non parte all'avvio di Argo.
+
+Setup (una volta sola):
+
+```powershell
+npm install -g openclaw     # installazione nativa Windows
+```
+
+Poi dalla dashboard, card 🦞 **OpenClaw — PC Agente** → pagina `/openclaw`:
+
+1. **Setup / Reinstalla** → Argo crea il workspace
+   (`ARGO_OPENCLAW_WORKSPACE`) e genera `config.yaml` popolando **tutti** i
+   modelli Ollama installati (interroga `GET {OLLAMA_URL}/api/tags`, niente nomi
+   hardcoded), heartbeat off, accesso totale, messaging predisposto ma disattivo.
+2. **Avvia / Ferma / Riavvia** il gateway.
+3. **Invia task**: scrivi cosa deve fare il PC-agente.
+4. **Log live** via SSE.
+
+⚠️ **OpenClaw ha accesso completo al PC.** Usalo con consapevolezza.
+
+L'architettura è generica (`app/pc_agents/`): aggiungere un nuovo agente PC =
+implementare `PcAgent` + `registry.register()`, e compare automaticamente in
+dashboard e nelle route `/agents/*`.

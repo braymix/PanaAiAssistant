@@ -83,12 +83,19 @@ def test_plan_status_404(client):
     assert client.get("/plans/nope/status").status_code == 404
 
 
-def test_new_research_conversation_stores_mode(client, db):
-    r = client.post("/chat/new", json={"mode": "research"})
-    assert r.status_code == 200 and r.json()["mode"] == "research"
+def test_new_conversation_stores_claudio_codice_mode(client, db):
+    # unica modalita' chat dopo la rimozione di "ricerca online": Claudio Codice.
+    r = client.post("/chat/new", json={"title": "Test"})
+    assert r.status_code == 200 and r.json()["mode"] == "claudio_codice"
     cid = r.json()["conversation_id"]
     row = db.query_one("SELECT title, mode FROM conversation WHERE id=?", (cid,))
-    assert row["mode"] == "research" and row["title"] == "Ricerca online"
+    assert row["mode"] == "claudio_codice" and row["title"] == "Test"
+
+
+def test_research_mode_is_gone(client, db):
+    # anche chiedendo esplicitamente la vecchia modalita', resta Claudio Codice.
+    r = client.post("/chat/new", json={"mode": "research"})
+    assert r.status_code == 200 and r.json()["mode"] == "claudio_codice"
 
 
 def test_stats_reports_euro(client):

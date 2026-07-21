@@ -106,28 +106,9 @@ def test_generate_plan_forces_repo_and_reroots_files(db, settings, roots):
     assert raw["tasks"][0]["verify_cwd"] == "."
 
 
-def test_research_mode_appends_web_research_prompt(db):
-    import asyncio
-    from app.planner import chat_stream, set_client_cls
-
-    seen_system.clear()
-    seen_resume.clear()
-    _counter["n"] = 0
-    set_client_cls(FakePlannerClient)
-    try:
-        cid = new_id("conv")
-        db.execute(
-            "INSERT INTO conversation(id, title, plan_mode, created_at, mode) "
-            "VALUES(?,?,?,?,?)", (cid, "r", 1, utcnow(), "research"))
-        asyncio.run(chat_stream(cid, ".", "cerca X"))
-        sp = seen_system[-1]
-        assert isinstance(sp, dict) and sp.get("type") == "preset"
-        assert "RICERCA" in sp.get("append", "")
-    finally:
-        set_client_cls(None)
-
-
-def test_generic_mode_no_custom_system_prompt(db):
+def test_claudio_codice_no_custom_system_prompt(db):
+    # dopo la rimozione di "ricerca online" la chat non inietta mai un system
+    # prompt custom: usa il preset di default del planner.
     import asyncio
     from app.planner import chat_stream, set_client_cls
 
@@ -138,9 +119,9 @@ def test_generic_mode_no_custom_system_prompt(db):
         cid = new_id("conv")
         db.execute(
             "INSERT INTO conversation(id, title, plan_mode, created_at, mode) "
-            "VALUES(?,?,?,?,?)", (cid, "g", 1, utcnow(), "generic"))
+            "VALUES(?,?,?,?,?)", (cid, "g", 1, utcnow(), "claudio_codice"))
         asyncio.run(chat_stream(cid, ".", "fai Y"))
-        assert seen_system[-1] is None   # generica: nessun prompt custom
+        assert seen_system[-1] is None   # nessun prompt custom
     finally:
         set_client_cls(None)
 

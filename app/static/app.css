@@ -126,7 +126,7 @@ h3:first-child { margin-top: 0; }
 }
 .statseg.warn .k, .statseg.warn .l { color: var(--yellow); }
 
-/* card azione primaria "Nuova ricerca" */
+/* card azione primaria "Claudio Codice" */
 .hero {
   text-align: left; display: flex; align-items: center; gap: 14px;
   padding: 17px 18px; border-radius: 20px; border: 0;
@@ -435,3 +435,60 @@ h3:first-child { margin-top: 0; }
 .btn.danger:active { background: #a5281b; }
 
 #queue-pause.is-paused { color: #ffb74d; border-color: rgba(255,183,77,.5); }
+
+/* ============================================================================
+   PC Agenti (dashboard + pagina agente / OpenClaw)
+   ========================================================================== */
+.agents-grid { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; }
+.agent-card { grid-column: span 1; display: flex; align-items: center; gap: 12px;
+  padding: 14px; border: 1px solid var(--line); border-radius: 16px;
+  background: var(--panel); color: var(--fg); text-decoration: none; }
+.agent-card.agent-hero { grid-column: 1 / -1; padding: 18px;
+  background: linear-gradient(135deg, var(--panel), var(--panel2));
+  border-color: var(--accent2); }
+.agent-card .agent-ico { font-size: 30px; line-height: 1; }
+.agent-card.agent-hero .agent-ico { font-size: 40px; }
+.agent-card .agent-body { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.agent-card .agent-body .t { font-weight: 600; }
+.agent-card .agent-body .s { color: var(--muted); font-size: 13px; }
+.agent-state { display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; color: var(--muted); }
+
+/* pallino stato (riuso in dashboard + header pagina) */
+.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block;
+  background: var(--danger); box-shadow: 0 0 8px rgba(255,92,102,.6); }
+.dot.on { background: var(--green); box-shadow: 0 0 8px rgba(70,211,154,.6); }
+.dot.off { background: var(--danger); box-shadow: 0 0 8px rgba(255,92,102,.5); }
+
+/* pagina agente */
+.agent-page .warn-box { border: 1px solid var(--amber); background: rgba(255,180,84,.08);
+  color: var(--fg2); border-radius: 14px; padding: 12px 14px; margin: 8px 0 14px;
+  font-size: 14px; line-height: 1.4; }
+.agent-meta { background: var(--panel); border: 1px solid var(--line);
+  border-radius: 14px; padding: 8px 14px; margin-bottom: 14px; }
+.agent-meta .meta-row { display: flex; justify-content: space-between;
+  padding: 6px 0; border-bottom: 1px solid var(--line-soft); }
+.agent-meta .meta-row:last-child { border-bottom: 0; }
+.agent-meta .k { color: var(--muted); } .agent-meta .v { color: var(--fg); font-weight: 500; }
+.agent-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  margin-bottom: 16px; }
+.agent-actions .btn { width: 100%; }
+.agent-task { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+.agent-task textarea { width: 100%; background: var(--panel2); color: var(--fg);
+  border: 1px solid var(--line); border-radius: 12px; padding: 10px; resize: vertical; }
+.log-box { background: var(--deep); border: 1px solid var(--line); border-radius: 12px;
+  padding: 10px; height: 240px; overflow-y: auto; font-family: ui-monospace, monospace;
+  font-size: 12px; color: var(--fg2); }
+.log-box .logline { white-space: pre-wrap; word-break: break-word; padding: 1px 0; }
+.tile.disabled { opacity: .55; pointer-events: none; }
+.switch { position: relative; display: inline-block; width: 40px; height: 22px; }
+.switch input { display: none; }
+.switch .slider { position: absolute; inset: 0; background: var(--line);
+  border-radius: 22px; transition: .2s; }
+.switch .slider::before { content: ""; position: absolute; width: 16px; height: 16px;
+  left: 3px; top: 3px; background: var(--muted); border-radius: 50%; transition: .2s; }
+.toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+  background: var(--panel); color: var(--fg); border: 1px solid var(--line);
+  border-radius: 10px; padding: 10px 16px; opacity: 0; pointer-events: none;
+  transition: opacity .2s; z-index: 50; }
+.toast.show { opacity: 1; }
