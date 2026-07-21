@@ -16,12 +16,21 @@ from pydantic import BaseModel
 from ..config import get_settings
 from ..db import get_db
 from ..events import get_bus
+from ..preflight import check_backends
 from ..system import (
     factory_reset, get_effects, poweroff_pc, restart_app, restart_services,
     shutdown_app,
 )
 
 router = APIRouter(prefix="/system")
+
+
+@router.get("/health")
+async def system_health():
+    """Preflight dei backend: la Claude Code CLI sull'abbonamento e la STESSA CLI
+    puntata a Ollama locale (§1.2). Sola lettura, non tocca nulla. Mostra anche
+    lo stato dell'auto-approvazione (ARGO_AUTO_APPROVE)."""
+    return await check_backends(get_settings())
 
 
 class Confirm(BaseModel):

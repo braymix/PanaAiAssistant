@@ -86,38 +86,55 @@ def _is_self_protected(resolved: Path, self_root: Path | None) -> bool:
 
 def evaluate(tool_name: str, tool_input: dict, files_allowed: set[Path],
              roots: list[Path], bash_allowlist: list[str],
-             self_root: Path | None = None, self_protect: bool = False) -> tuple[str, str]:
+             self_root: Path | None = None, self_protect: bool = False,
+             auto_approve: bool = False, allow_dangerous: bool = False) -> tuple[str, str]:
     """Ritorna ('allow'|'deny'|'ask', motivo). Nessun effetto collaterale.
 
     Se `self_protect` e' attivo e il path risolto e' un file sensibile di Argo
-    dentro `self_root` (SELF_PROTECTED), il verdetto e' sempre 'ask' anche se il
-    file e' nel perimetro `files_allowed` (Addendum §4)."""
+    dentro `self_root` (SELF_PROTECTED), il verdetto e' 'ask' anche se il file e'
+    nel perimetro `files_allowed` (Addendum §4).
+
+    `auto_approve` (ARGO_AUTO_APPROVE): un verdetto 'ask' — l'eccezione che
+    andrebbe al telefono — diventa 'allow'. NON tocca gli altri due esiti: il
+    confine delle root (deny) e lo strato distruttivo (deny) restano.
+
+    `allow_dangerous` (ARGO_ALLOW_DANGEROUS): anche i comandi Bash distruttivi
+    diventano 'allow'. Il confine delle root resta comunque invalicabile."""
+    def ask(reason: str) -> tuple[str, str]:
+        # con auto_approve l'eccezione non va al telefono: si auto-permette.
+        if auto_approve:
+            return "allow", f"auto-approvato (ARGO_AUTO_APPROVE): {reason}"
+        return "ask", reason
+
     if tool_name in ("Write", "Edit"):
         raw = tool_input.get("file_path")
         if not raw:
-            return "ask", "Write/Edit senza file_path"
+            return ask("Write/Edit senza file_path")
         try:
             resolved = resolve_within_roots(raw, roots)
         except PathNotAllowed as e:
+            # confine delle root (regola 4.3): mai auto-allow, nemmeno in auto.
             return "deny", f"path fuori dalle root consentite: {e}"
         # guard "se stesso": i file di sicurezza di Argo non sono mai auto-allow.
         if self_protect and _is_self_protected(resolved, self_root):
-            return "ask", f"file sensibile di Argo (progetto se stesso): {resolved}"
+            return ask(f"file sensibile di Argo (progetto se stesso): {resolved}")
         if resolved in files_allowed:
             return "allow", "dentro il perimetro approvato col VIA"
-        return "ask", f"file fuori dal perimetro del piano: {resolved}"
+        return ask(f"file fuori dal perimetro del piano: {resolved}")
 
     if tool_name == "Bash":
         cmd = tool_input.get("command", "")
         if is_dangerous_bash(cmd):
+            if allow_dangerous:
+                return "allow", "comando distruttivo AUTO-APPROVATO (ARGO_ALLOW_DANGEROUS=1)"
             # deny deterministico, prima di tutto (§8, secondo strato)
             return "deny", "comando distruttivo bloccato dalla policy deterministica"
         if cmd_matches_allowlist(cmd, bash_allowlist):
             return "allow", "comando in allowlist"
-        return "ask", "comando fuori allowlist"
+        return ask("comando fuori allowlist")
 
     # tutto il resto (Read incluso di norma e' in allowed_tools): chiedi.
-    return "ask", f"tool non coperto dal piano: {tool_name}"
+    return ask(f"tool non coperto dal piano: {tool_name}")
 
 
 def make_policy_gate(ctx: GateContext):
@@ -133,6 +150,8 @@ def make_policy_gate(ctx: GateContext):
             ctx.roots, settings.bash_allowlist,
             self_root=settings.self_root.resolve(),
             self_protect=settings.self_protect,
+            auto_approve=settings.auto_approve,
+            allow_dangerous=settings.allow_dangerous,
         )
 
         if verdict == "allow":
