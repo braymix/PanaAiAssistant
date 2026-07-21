@@ -39,7 +39,51 @@ async def lifespan(app: FastAPI):
     init_db(settings.db_path)
     _sanity_checks(settings)
     _openclaw_silent_check(settings)
+    _backends_preflight_log(settings)
     yield
+
+
+def _backends_preflight_log(settings) -> None:
+    """Preflight non bloccante all'avvio (§B.1): verifica che i due canali che
+    Argo usa siano pronti — la Claude Code CLI (abbonamento) e la STESSA CLI su
+    Ollama locale — e logga lo stato. Non installa/avvia nulla. Espone anche se
+    l'auto-approvazione e' attiva. Tollerante a qualsiasi errore."""
+    import asyncio
+
+    async def _bg():
+        try:
+            from .preflight import check_backends
+            h = await check_backends(settings)
+            sub, oll = h["subscription"], h["ollama"]
+            if sub["ok"]:
+                log.info("Backend abbonamento: Claude Code CLI pronta (%s).",
+                         sub["cli_path"])
+            else:
+                log.warning("Backend abbonamento NON pronto: CLI `claude` "
+                            "installata=%s, SDK=%s. Installa la CLI e fai il login "
+                            "(`claude` -> /login) per il planner e l'escalation.",
+                            sub["cli_installed"], sub["sdk_importable"])
+            if not oll["reachable"]:
+                log.warning("Backend Ollama NON raggiungibile (%s): avvia Ollama "
+                            "per usare la CLI sui modelli locali.", oll["url"])
+            elif not oll["primary_installed"]:
+                log.warning("Ollama raggiungibile (%s) ma il modello primario '%s' "
+                            "NON e' installato: `ollama pull %s`.",
+                            oll["url"], oll["primary_model"], oll["primary_model"])
+            else:
+                log.info("Backend Ollama: %s raggiungibile, modello '%s' installato.",
+                         oll["url"], oll["primary_model"])
+            if settings.auto_approve:
+                log.warning("ARGO_AUTO_APPROVE=1: approvazioni AUTOMATICHE (niente "
+                            "conferma dal telefono). ARGO_ALLOW_DANGEROUS=%s.",
+                            "1" if settings.allow_dangerous else "0")
+        except Exception as e:  # noqa: BLE001 — mai far fallire lo startup
+            log.debug("Preflight backend saltato: %s", e)
+
+    try:
+        asyncio.ensure_future(_bg())
+    except RuntimeError:
+        pass   # nessun loop (contesto non-async): il preflight e' opzionale
 
 
 def _openclaw_silent_check(settings) -> None:

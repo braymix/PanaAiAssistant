@@ -67,3 +67,48 @@ def test_dangerous_bash_denied_even_if_allowlisted():
     # anche se 'rm' fosse per assurdo in allowlist, la denylist vince (§8)
     verdict, _ = evaluate("Bash", {"command": "rm -rf /"}, set(), [], ["rm"])
     assert verdict == "deny"
+
+
+# --- auto-approvazione (ARGO_AUTO_APPROVE) --------------------------------------
+def test_auto_approve_turns_ask_into_allow(roots):
+    """Con auto_approve, un Write fuori dal perimetro (eccezione) diventa allow."""
+    inside_root = (roots[0] / "src" / "c.py")
+    inside_root.parent.mkdir(parents=True)
+    inside_root.write_text("x")
+    verdict, reason = evaluate("Write", {"file_path": str(inside_root)}, set(),
+                               roots, [], auto_approve=True)
+    assert verdict == "allow"
+    assert "auto-approvato" in reason.lower()
+
+
+def test_auto_approve_unknown_tool_allows(roots):
+    verdict, _ = evaluate("WebFetch", {"url": "http://x"}, set(), roots, [],
+                          auto_approve=True)
+    assert verdict == "allow"
+
+
+def test_auto_approve_bash_outside_allowlist_allows():
+    verdict, _ = evaluate("Bash", {"command": "npm run build"}, set(), [], [],
+                          auto_approve=True)
+    assert verdict == "allow"
+
+
+def test_auto_approve_still_denies_dangerous():
+    """Lo strato distruttivo NON e' toccato dall'auto-approvazione (§8)."""
+    verdict, _ = evaluate("Bash", {"command": "rm -rf /"}, set(), [], [],
+                          auto_approve=True)
+    assert verdict == "deny"
+
+
+def test_auto_approve_still_denies_outside_root(roots, tmp_path):
+    """Il confine delle root (regola 4.3) resta invalicabile anche in auto."""
+    outside = tmp_path / "evil.py"
+    verdict, _ = evaluate("Write", {"file_path": str(outside)}, set(), roots, [],
+                          auto_approve=True)
+    assert verdict == "deny"
+
+
+def test_allow_dangerous_overrides_dangerous_deny():
+    verdict, _ = evaluate("Bash", {"command": "rm -rf /"}, set(), [], [],
+                          auto_approve=True, allow_dangerous=True)
+    assert verdict == "allow"

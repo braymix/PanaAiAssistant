@@ -232,6 +232,20 @@ class Settings:
     # --- approvazioni (regola 4.6: il timeout NEGA) -----------------------------
     approval_timeout_s: int = int(os.environ.get("ARGO_APPROVAL_TIMEOUT_S", "300"))
 
+    # --- auto-approvazione (comodita' utente singolo su loopback) ----------------
+    # Se attivo, il PolicyGate AUTO-APPROVA tutto cio' che chiederebbe conferma al
+    # telefono (verdetto 'ask'): niente push, niente attesa, niente timeout. Il
+    # gate gira COMUNQUE ed emette gli eventi (auto-allow != no-gate, §8). NON
+    # tocca due cose: lo strato deterministico che NEGA i comandi distruttivi
+    # (rm -rf, mkfs, ...) e il confine delle root (regola 4.3): un 'ask' diventa
+    # 'allow', un 'deny' resta 'deny'. Default: ATTIVO.
+    auto_approve: bool = os.environ.get("ARGO_AUTO_APPROVE", "1") != "0"
+    # Se attivo, anche i comandi Bash distruttivi vengono AUTO-APPROVATI invece di
+    # essere negati dallo strato deterministico (§8). Pericoloso: lascia eseguire
+    # all'LLM anche 'rm -rf'. Il confine delle root resta comunque invalicabile.
+    # Default: NON attivo (lo strato di sicurezza distruttivo resta in piedi).
+    allow_dangerous: bool = os.environ.get("ARGO_ALLOW_DANGEROUS", "0") == "1"
+
     # --- display costo: il costo dall'SDK e' in USD ed e' STIMATO (equivalente
     # API), non un addebito reale sull'abbonamento. Lo mostriamo in EUR. --------
     usd_to_eur: float = float(os.environ.get("ARGO_USD_EUR", "0.92"))

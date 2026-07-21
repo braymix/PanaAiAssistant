@@ -35,6 +35,10 @@ def settings(tmp_path, roots) -> config.Settings:
         approval_timeout_s=2,
         vapid_keys_path=tmp_path / "nope.json",   # niente push nei test
         dev_allow_no_identity=True,
+        # la fixture modella la modalita' GATED (human-in-the-loop): i test del
+        # flusso approvazioni contano sul verdetto 'ask'. L'auto-approvazione,
+        # attiva di default a runtime, e' testata a parte passando il flag.
+        auto_approve=False,
         # workspace OpenClaw in tmp: MAI il path Windows reale (§Test).
         openclaw_workspace=tmp_path / "openclaw",
     )
