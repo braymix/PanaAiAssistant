@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import platform
+import re
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from .backends import make_planner_options, make_via_options
@@ -89,15 +90,24 @@ VIA_SYSTEM = (
 def _extract_json(text: str) -> dict:
     text = text.strip()
     if text.startswith("```"):
-        # rimuove eventuale fence ```json ... ```
-        text = text.split("```", 2)[1]
-        if text.startswith("json"):
+        # rimuove un eventuale fence ```json ... ``` (anche senza chiusura)
+        text = text[3:]
+        if text[:4].lower() == "json":
             text = text[4:]
-        text = text.strip("`").strip()
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
     start, end = text.find("{"), text.rfind("}")
     if start == -1 or end == -1:
         raise ValueError("Nessun JSON nel testo del planner.")
-    return json.loads(text[start:end + 1])
+    blob = text[start:end + 1]
+    try:
+        return json.loads(blob)
+    except json.JSONDecodeError:
+        # riparazione leggera dell'errore LLM piu' comune: virgola finale prima
+        # di } o ]. Se non basta, l'eccezione si propaga (gestita a monte con
+        # una richiesta di autocorrezione al planner).
+        return json.loads(re.sub(r",(\s*[}\]])", r"\1", blob))
 
 
 # classe client iniettabile (i test ne passano una finta; a runtime e' l'SDK)
@@ -176,6 +186,23 @@ def _record_planner_run(db, conversation_id: str, session_id: str | None,
     )
 
 
+def _is_resume_failure(exc: Exception) -> bool:
+    """Vero se l'SDK e' fallito all'avvio perche' la sessione da riprendere non
+    esiste piu' nel CLI (store ripulito, altra macchina, sessione scaduta): il
+    CLI stampa 'No conversation found with session ID: ...' ed esce con codice 1.
+    Lo stderr catturato e' a volte generico, quindi trattiamo come recuperabile
+    ogni errore dell'SDK avvenuto mentre stavamo riprendendo una sessione: in tal
+    caso ripartire da zero e' meglio che rispondere 500."""
+    try:
+        from claude_agent_sdk import ClaudeSDKError
+    except Exception:  # noqa: BLE001 — senza SDK non c'e' nulla da recuperare
+        ClaudeSDKError = ()
+    if isinstance(exc, ClaudeSDKError):
+        return True
+    blob = f"{exc} {getattr(exc, 'stderr', '') or ''}".lower()
+    return "no conversation found" in blob or "session id" in blob
+
+
 async def _ask_phone_gate(tool_name, input_data, context):
     # Il planner e' in plan mode e ha Write/Edit/Bash/AskUserQuestion gia'
     # DISALLOWED (backends.PLANNER_DISALLOWED): tutto cio' che arriva qui e' un
@@ -208,35 +235,52 @@ async def chat_stream(conversation_id: str, repo_cwd: str, user_text: str,
     # continuita' della conversazione: se non passato, riprendi l'ultima sessione
     if resume_session is None:
         resume_session = _latest_planner_session(db, conversation_id)
-    options = make_planner_options(settings, repo_cwd, _ask_phone_gate)
-    if resume_session:
-        options.resume = resume_session
-    # modalita' della conversazione: 'research' potenzia per la ricerca online
-    if _conversation_mode(db, conversation_id) == "research":
-        # APPEND al preset claude_code: non sostituisce il prompt di default
-        options.system_prompt = {"type": "preset", "preset": "claude_code",
-                                 "append": RESEARCH_APPEND}
+    is_research = _conversation_mode(db, conversation_id) == "research"
 
-    assistant_text: list[str] = []
-    session_id = resume_session
+    def _options(resume):
+        opts = make_planner_options(settings, repo_cwd, _ask_phone_gate)
+        if resume:
+            opts.resume = resume
+        # modalita' 'research': APPEND al preset claude_code, non lo sostituisce
+        if is_research:
+            opts.system_prompt = {"type": "preset", "preset": "claude_code",
+                                  "append": RESEARCH_APPEND}
+        return opts
 
-    async with _get_client_cls()(options=options) as client:
-        await client.query(user_text)
-        async for msg in client.receive_response():
-            name = type(msg).__name__
-            data = getattr(msg, "data", None)
-            if getattr(msg, "subtype", None) == "init" and isinstance(data, dict):
-                session_id = data.get("session_id") or session_id
-            if name == "AssistantMessage":
-                for block in getattr(msg, "content", []) or []:
-                    if type(block).__name__ == "TextBlock":
-                        chunk = getattr(block, "text", "")
-                        assistant_text.append(chunk)
-                        await bus.emit(None, "chat_delta", {
-                            "conversation_id": conversation_id, "text": chunk,
-                        })
+    # `streamed` accumula i pezzi e fa anche da flag "ho gia' emesso dei delta":
+    # se il primo tentativo fallisce PRIMA di emettere, possiamo ripartire pulito
+    # senza rischiare delta duplicati.
+    streamed: list[str] = []
 
-    full = "".join(assistant_text)
+    async def _run_turn(resume):
+        sid = resume
+        async with _get_client_cls()(options=_options(resume)) as client:
+            await client.query(user_text)
+            async for msg in client.receive_response():
+                data = getattr(msg, "data", None)
+                if getattr(msg, "subtype", None) == "init" and isinstance(data, dict):
+                    sid = data.get("session_id") or sid
+                if type(msg).__name__ == "AssistantMessage":
+                    for block in getattr(msg, "content", []) or []:
+                        if type(block).__name__ == "TextBlock":
+                            chunk = getattr(block, "text", "")
+                            streamed.append(chunk)
+                            await bus.emit(None, "chat_delta", {
+                                "conversation_id": conversation_id, "text": chunk,
+                            })
+        return sid
+
+    try:
+        session_id = await _run_turn(resume_session)
+    except Exception as e:  # noqa: BLE001
+        # sessione da riprendere non piu' valida: riparti da zero, una volta sola
+        if resume_session and not streamed and _is_resume_failure(e):
+            log.warning("resume del planner fallito (%s); riparto senza sessione", e)
+            session_id = await _run_turn(None)
+        else:
+            raise
+
+    full = "".join(streamed)
     db.execute(
         "INSERT INTO message(conversation_id, role, content, ts) VALUES(?,?,?,?)",
         (conversation_id, "assistant", full, utcnow()),
@@ -264,13 +308,6 @@ async def generate_plan(conversation_id: str, repo_path: str,
     # il piano deve riflettere la discussione: riprendi la sessione del planner
     if resume_session is None:
         resume_session = _latest_planner_session(db, conversation_id)
-    # NON plan mode (vedi make_via_options): serve JSON, non un piano proposto.
-    options = make_via_options(settings, repo_path, _ask_phone_gate)
-    if resume_session:
-        options.resume = resume_session
-    # inietta il contratto d'output del VIA
-    options.system_prompt = VIA_SYSTEM
-
     research_note = ""
     if _conversation_mode(db, conversation_id) == "research":
         research_note = (
@@ -279,32 +316,54 @@ async def generate_plan(conversation_id: str, repo_path: str,
             "hai raccolto DEVE stare INTERO nel campo context di ogni TaskBrief; il "
             "task locale deve solo formattarlo/assemblarlo, non 'cercarlo'.\n")
 
-    raw_text: list[str] = []
-    cost = 0.0
-    async with _get_client_cls()(options=options) as client:
-        await client.query(
-            f"Genera ORA il PlanDocument JSON per la feature discussa.\n"
-            f"{research_note}"
-            f"Sistema operativo dell'utente: {platform.system()}. Ogni verify_cmd "
-            f"DEVE funzionare qui: se Windows, NIENTE test/grep/ls/cat, usa "
-            f"python -c \"...\" (vedi regole).\n"
-            f"repo_path DEVE essere ESATTAMENTE: {repo_path}\n"
-            f"In files_allowed usa SOLO percorsi RELATIVI a repo_path (es. "
-            f"'README.md' o 'sezioni/intro.md'), MAI percorsi assoluti e "
-            f"MAI cartelle diverse da repo_path.\n"
-            f"Rispondi con UN SOLO oggetto JSON, niente altro testo."
-        )
-        async for msg in client.receive_response():
-            if type(msg).__name__ == "AssistantMessage":
-                for block in getattr(msg, "content", []) or []:
-                    if type(block).__name__ == "TextBlock":
-                        raw_text.append(getattr(block, "text", ""))
-            if type(msg).__name__ == "ResultMessage":
-                cost = getattr(msg, "total_cost_usd", 0) or 0.0
-                # fallback: alcune risposte arrivano solo nel campo result
-                res = getattr(msg, "result", None)
-                if res and not raw_text:
-                    raw_text.append(str(res))
+    via_query = (
+        f"Genera ORA il PlanDocument JSON per la feature discussa.\n"
+        f"{research_note}"
+        f"Sistema operativo dell'utente: {platform.system()}. Ogni verify_cmd "
+        f"DEVE funzionare qui: se Windows, NIENTE test/grep/ls/cat, usa "
+        f"python -c \"...\" (vedi regole).\n"
+        f"repo_path DEVE essere ESATTAMENTE: {repo_path}\n"
+        f"In files_allowed usa SOLO percorsi RELATIVI a repo_path (es. "
+        f"'README.md' o 'sezioni/intro.md'), MAI percorsi assoluti e "
+        f"MAI cartelle diverse da repo_path.\n"
+        f"Rispondi con UN SOLO oggetto JSON, niente altro testo."
+    )
+
+    def _options(resume):
+        # NON plan mode (vedi make_via_options): serve JSON, non un piano proposto.
+        opts = make_via_options(settings, repo_path, _ask_phone_gate)
+        if resume:
+            opts.resume = resume
+        opts.system_prompt = VIA_SYSTEM   # inietta il contratto d'output del VIA
+        return opts
+
+    async def _run(resume, query):
+        raw_text: list[str] = []
+        cost = 0.0
+        async with _get_client_cls()(options=_options(resume)) as client:
+            await client.query(query)
+            async for msg in client.receive_response():
+                if type(msg).__name__ == "AssistantMessage":
+                    for block in getattr(msg, "content", []) or []:
+                        if type(block).__name__ == "TextBlock":
+                            raw_text.append(getattr(block, "text", ""))
+                if type(msg).__name__ == "ResultMessage":
+                    cost = getattr(msg, "total_cost_usd", 0) or 0.0
+                    # fallback: alcune risposte arrivano solo nel campo result
+                    res = getattr(msg, "result", None)
+                    if res and not raw_text:
+                        raw_text.append(str(res))
+        return raw_text, cost
+
+    try:
+        raw_text, cost = await _run(resume_session, via_query)
+    except Exception as e:  # noqa: BLE001
+        # sessione da riprendere non piu' valida: riparti da zero, una volta sola
+        if resume_session and _is_resume_failure(e):
+            log.warning("resume del VIA fallito (%s); riparto senza sessione", e)
+            raw_text, cost = await _run(None, via_query)
+        else:
+            raise
 
     joined = "".join(raw_text).strip()
     if not joined:
@@ -315,10 +374,34 @@ async def generate_plan(conversation_id: str, repo_path: str,
     try:
         data = _extract_json(joined)
     except (ValueError, json.JSONDecodeError) as e:
-        log.warning("VIA: JSON non estraibile. Testo del planner:\n%s", joined[:2000])
-        raise PlanValidationError(
-            f"Il planner non ha risposto in JSON ({e}). Anteprima: "
-            f"{joined[:300]!r}. Riprova chiedendo in chat un piano piu' concreto.")
+        # AUTOCORREZIONE: il JSON grande del planner spesso ha piccoli difetti
+        # (virgolette non escappate, newline reali nelle stringhe). Invece di
+        # scaricare tutto sull'utente, rimandiamo l'output al planner e gli
+        # chiediamo di restituirlo come JSON valido: i modelli sono bravissimi.
+        log.warning("VIA: JSON non valido (%s); chiedo autocorrezione al planner", e)
+        fix_query = (
+            "Il JSON che hai appena prodotto NON e' sintatticamente valido "
+            f"(errore del parser: {e}).\n"
+            "Ecco ESATTAMENTE cosa hai prodotto, tra i marcatori <<< e >>>:\n"
+            f"<<<\n{joined[:14000]}\n>>>\n"
+            "Restituiscilo di nuovo come UN SOLO oggetto JSON VALIDO e COMPLETO "
+            "che rappresenti lo stesso PlanDocument. Correggi gli errori di "
+            "sintassi: virgolette interne da escappare (\\\"), newline dentro le "
+            "stringhe scritti come \\n, nessuna virgola finale. NIENTE fence "
+            "markdown, NIENTE testo attorno: solo il JSON."
+        )
+        fix_text, fix_cost = await _run(None, fix_query)
+        cost += fix_cost
+        joined2 = "".join(fix_text).strip()
+        try:
+            data = _extract_json(joined2)
+        except (ValueError, json.JSONDecodeError) as e2:
+            log.warning("VIA: JSON non estraibile neanche dopo autocorrezione. "
+                        "Testo del planner:\n%s", joined[:2000])
+            raise PlanValidationError(
+                f"Il planner non e' riuscito a produrre un piano in JSON valido "
+                f"({e2}). Prova a descrivere in chat una feature piu' piccola e "
+                f"concreta, poi ripremi VIA.")
     # FORZA il repo_path al progetto scelto: il planner tende a inventarne uno
     # (es. C:\Users\...\Documents\Progetto) che cade fuori dalle root e fa fallire
     # tutto. E' l'utente col progetto a decidere DOVE si scrive, non il planner.

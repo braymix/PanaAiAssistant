@@ -170,3 +170,106 @@ def test_planner_session_persisted_and_resumed(db):
         assert seen_resume[1] == "sess-1"
     finally:
         set_client_cls(None)  # ripristina l'import pigro dell'SDK
+
+
+class _StaleResumeClient:
+    """Simula una sessione non piu' esistente: se options.resume e' valorizzato
+    l'avvio del CLI fallisce (come 'No conversation found with session ID');
+    senza resume, invece, riparte pulito."""
+    attempts: list = []
+
+    def __init__(self, options=None):
+        self.resume = getattr(options, "resume", None)
+        _StaleResumeClient.attempts.append(self.resume)
+        self._sid = "sess-fresh"
+
+    async def __aenter__(self):
+        if self.resume:
+            from claude_agent_sdk import ProcessError
+            raise ProcessError("Command failed", exit_code=1,
+                               stderr="No conversation found with session ID: x")
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def query(self, prompt):
+        self.prompt = prompt
+
+    async def receive_response(self):
+        yield _Init(self._sid)
+        yield AssistantMessage([TextBlock("ripartito da zero")])
+
+
+class _BadThenGoodJSONClient:
+    """Prima risposta: JSON rotto (virgolette non escappate). Alla richiesta di
+    autocorrezione (il prompt contiene i marcatori <<< >>>): JSON valido."""
+    VALID = ('{"repo_path": "X", "tasks": [{"id": "t1", "title": "Sez 1", '
+             '"instructions": "scrivi", "files_allowed": ["intro.md"], '
+             '"verify_cmd": "python -c \\"pass\\"", "verify_cwd": "."}]}')
+    BROKEN = '{"repo_path": "X", "tasks": [ROTTO senza virgolette]}'
+
+    def __init__(self, options=None):
+        self.options = options
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def query(self, prompt):
+        self.is_fix = "<<<" in prompt   # e' la richiesta di autocorrezione?
+
+    async def receive_response(self):
+        payload = self.VALID if getattr(self, "is_fix", False) else self.BROKEN
+        yield AssistantMessage([TextBlock(payload)])
+
+
+def test_generate_plan_autocorrects_invalid_json(db):
+    """Se il primo JSON e' rotto, il planner viene richiamato per correggerlo e
+    il piano si crea comunque, senza scaricare l'errore sull'utente."""
+    from app.planner import generate_plan, set_client_cls
+
+    set_client_cls(_BadThenGoodJSONClient)
+    try:
+        cid = new_id("conv")
+        db.execute(
+            "INSERT INTO conversation(id, title, plan_mode, created_at) VALUES(?,?,?,?)",
+            (cid, "t", 1, utcnow()))
+        plan_id = asyncio.run(generate_plan(cid, "."))
+        assert plan_id
+        n = db.query_one("SELECT COUNT(*) c FROM task WHERE plan_id=?", (plan_id,))["c"]
+        assert n == 1
+    finally:
+        set_client_cls(None)
+
+
+def test_chat_stream_recovers_from_stale_resume(db):
+    """Se la sessione da riprendere non esiste piu', il turno riparte senza
+    resume invece di crashare (500)."""
+    _StaleResumeClient.attempts.clear()
+    set_client_cls(_StaleResumeClient)
+    try:
+        cid = new_id("conv")
+        db.execute(
+            "INSERT INTO conversation(id, title, plan_mode, created_at) VALUES(?,?,?,?)",
+            (cid, "t", 1, utcnow()))
+        # semina una sessione precedente (stantia) che verra' tentata come resume
+        db.execute(
+            "INSERT INTO run(id, task_id, conversation_id, session_id, backend, "
+            "model, status, cost_usd, started_at, ended_at) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (new_id("run"), None, cid, "stale-sess", "subscription", "default",
+             "done", 0.0, utcnow(), utcnow()))
+
+        asyncio.run(chat_stream(cid, ".", "ciao"))
+        # primo tentativo col resume stantio, secondo senza (fallback)
+        assert _StaleResumeClient.attempts == ["stale-sess", None]
+        # la risposta del turno pulito e' stata persistita
+        msg = db.query_one(
+            "SELECT content FROM message WHERE conversation_id=? AND role='assistant'",
+            (cid,))
+        assert msg["content"] == "ripartito da zero"
+    finally:
+        set_client_cls(None)

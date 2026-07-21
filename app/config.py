@@ -55,12 +55,20 @@ def default_model_tiers() -> list[ModelTier]:
     Le stime VRAM sono conservative (peso a runtime del modello quantizzato + KV
     cache); il router lascia sempre un headroom (ARGO_VRAM_HEADROOM_MB)."""
     return [
+        # veloce, per task semplici: Q4 ~5-6GB, sta tutto in GPU.
         ModelTier("light", "ollama", "qwen2.5-coder:7b",
                   est_vram_mb=6000, rel_speed=5, quality=2),
-        ModelTier("mid", "ollama", os.environ.get("ARGO_OLLAMA_MODEL", "qwen3-coder"),
+        # WORKHORSE primario: 14B Q4 ~9GB, entra INTERO nei 12GB -> pieno GPU,
+        # tool-calling affidabile. E' il default di ARGO_OLLAMA_MODEL.
+        ModelTier("mid", "ollama",
+                  os.environ.get("ARGO_OLLAMA_MODEL", "qwen2.5-coder:14b"),
                   est_vram_mb=9000, rel_speed=3, quality=3),
-        ModelTier("heavy", "ollama", "qwen2.5-coder:14b",
-                  est_vram_mb=11000, rel_speed=2, quality=4),
+        # miglior coder AGENTICO locale (MoE 30B-A3B, tag di default di ollama):
+        # su 12GB riempie la GPU e fa offload parziale su CPU -> piu' lento ma piu'
+        # forte. Ultima risorsa locale prima di salire all'abbonamento; se la VRAM
+        # e' occupata il router escala direttamente a 'frontier'.
+        ModelTier("heavy", "ollama", "qwen3-coder",
+                  est_vram_mb=11000, rel_speed=1, quality=4),
         ModelTier("frontier", "subscription", "",
                   est_vram_mb=0, rel_speed=4, quality=5),
     ]
@@ -180,7 +188,7 @@ class Settings:
 
     # backend Ollama (§1.2/1.3)
     ollama_url: str = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-    ollama_model: str = os.environ.get("ARGO_OLLAMA_MODEL", "qwen3-coder")
+    ollama_model: str = os.environ.get("ARGO_OLLAMA_MODEL", "qwen2.5-coder:14b")
     ollama_context_length: str = os.environ.get("OLLAMA_CONTEXT_LENGTH", "65536")
     # log del server Ollama (default: posizione tipica su Windows). Override con
     # ARGO_OLLAMA_LOG se il tuo e' altrove.
