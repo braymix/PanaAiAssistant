@@ -90,6 +90,12 @@ class OpenClawProcess:
             return True
         self.workspace.mkdir(parents=True, exist_ok=True)
         cmd = self._build_command()
+        # marcatore di build + comando risolto: cosi' dal log si vede SUBITO se sta
+        # girando il codice nuovo (comando con `cmd /c ...openclaw.cmd`) o quello
+        # vecchio (comando `openclaw` nudo).
+        await get_bus().emit(None, "openclaw_log", {
+            "line": f"[argo v2] avvio comando: {cmd}", "level": "info",
+            "timestamp": time.time()})
         try:
             self.proc = subprocess.Popen(cmd, **self._popen_kwargs())
         except (OSError, ValueError) as e:
