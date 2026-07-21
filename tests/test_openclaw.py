@@ -103,6 +103,23 @@ def test_exec_argv_missing_returns_none(monkeypatch):
     assert openclaw_setup.exec_argv("openclaw", ["x"], is_windows=False) is None
 
 
+def test_exec_argv_explicit_bin_wins(monkeypatch):
+    """ARGO_OPENCLAW_BIN (explicit) ha la precedenza sul PATH."""
+    monkeypatch.setattr(openclaw_setup.shutil, "which", lambda n: "/altro/openclaw")
+    argv = openclaw_setup.exec_argv(
+        "openclaw", ["gateway"], is_windows=True,
+        explicit=r"C:\percorso\mio\openclaw.cmd")
+    assert argv == ["cmd", "/c", r"C:\percorso\mio\openclaw.cmd", "gateway"]
+
+
+def test_build_command_uses_explicit_bin(settings, db, monkeypatch):
+    settings.openclaw_bin = "/opt/openclaw-bin"
+    monkeypatch.setattr(openclaw_setup.shutil, "which", lambda n: None)
+    p = OpenClawProcess(settings)
+    cmd = p._build_command()
+    assert cmd[0] == "/opt/openclaw-bin" and cmd[1] == "gateway"
+
+
 def test_exec_argv_falls_back_to_npm_shim(monkeypatch, tmp_path):
     """PATH stale su Windows: which() None ma lo shim c'e' in %APPDATA%\\npm."""
     npm = tmp_path / "npm"

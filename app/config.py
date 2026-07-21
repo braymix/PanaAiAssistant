@@ -279,6 +279,10 @@ class Settings:
     ))
     # modello primario preferito per OpenClaw ("" = primo modello Ollama disponibile).
     openclaw_primary_model: str = os.environ.get("ARGO_OPENCLAW_PRIMARY_MODEL", "")
+    # percorso ESPLICITO dell'eseguibile openclaw (via di fuga se non e' sul PATH
+    # del processo Argo). Es. Windows: C:\Users\miche\AppData\Roaming\npm\openclaw.cmd
+    # Vuoto = auto (shutil.which + fallback npm).
+    openclaw_bin: str = os.environ.get("ARGO_OPENCLAW_BIN", "")
     openclaw_gateway_port: int = int(
         os.environ.get("ARGO_OPENCLAW_GATEWAY_PORT", "8766"))
     openclaw_max_concurrent: int = int(

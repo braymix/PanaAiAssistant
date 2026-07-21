@@ -62,23 +62,28 @@ def _openclaw_bin() -> str | None:
     return shutil.which("openclaw")
 
 
-def exec_argv(name: str, args: list[str],
-              is_windows: bool | None = None) -> list[str] | None:
+def exec_argv(name: str, args: list[str], is_windows: bool | None = None,
+              explicit: str | None = None) -> list[str] | None:
     """Argv per lanciare un eseguibile risolvendone lo shim.
 
-    Su Windows npm installa i comandi come shim `.cmd`/`.bat`: `subprocess` NON
-    li risolve da solo (fallisce con WinError 2), anche se il comando funziona nel
-    terminale. Qui risolviamo il percorso REALE con `shutil.which` (che applica il
-    PATHEXT) e, se e' uno shim `.cmd`/`.bat`, lo lanciamo via `cmd /c` (CreateProcess
-    non esegue i .cmd direttamente). None se il comando non e' sul PATH.
+    Ordine di risoluzione:
+      1. `explicit` — percorso indicato a mano (ARGO_OPENCLAW_BIN): via di fuga;
+      2. `shutil.which(name)` — sul PATH (applica il PATHEXT);
+      3. su Windows, fallback allo shim npm globale (`%APPDATA%\\npm`), utile se il
+         PATH del processo Argo e' "stale".
+
+    Su Windows npm installa i comandi come shim `.cmd`/`.bat`: `subprocess` NON li
+    risolve da solo (WinError 2), anche se il comando funziona nel terminale. Se il
+    percorso risolto e' uno shim `.cmd`/`.bat` lo lanciamo via `cmd /c` (CreateProcess
+    non esegue i .cmd direttamente). None se non trovato.
 
     `is_windows` e' iniettabile per i test; di default deriva da os.name."""
     if is_windows is None:
         is_windows = os.name == "nt"
-    exe = shutil.which(name)
+    exe = (explicit or "").strip() or None
+    if exe is None:
+        exe = shutil.which(name)
     if exe is None and is_windows:
-        # PATH del processo Argo "stale" (terminale aperto prima di installare
-        # Node): cerca lo shim nella cartella globale npm standard.
         exe = _find_npm_shim(name)
     if exe is None:
         return None
@@ -107,9 +112,10 @@ def _find_npm_shim(name: str) -> str | None:
     return None
 
 
-async def _run_version() -> tuple[bool, str | None]:
+async def _run_version(settings=None) -> tuple[bool, str | None]:
     """`openclaw --version`: (successo, versione). Non solleva."""
-    argv = exec_argv("openclaw", ["--version"])
+    explicit = getattr(settings, "openclaw_bin", "") if settings else ""
+    argv = exec_argv("openclaw", ["--version"], explicit=explicit)
     if argv is None:
         return False, None
     try:
@@ -183,7 +189,7 @@ async def _ollama_tags(settings) -> tuple[bool, list[dict]]:
 async def check_status(settings) -> OpenClawStatus:
     """Stato completo di OpenClaw. Tollerante: nessun crash se non installato o se
     il workspace non esiste (es. path Windows su Linux/CI)."""
-    installed, version = await _run_version()
+    installed, version = await _run_version(settings)
     workspace = Path(settings.openclaw_workspace)
     try:
         config_exists = _config_path(settings).exists()
@@ -206,7 +212,7 @@ async def ensure_installed(settings) -> bool:
 
     Se NON lo e', non lo installa: ritorna False e logga le istruzioni (l'utente
     fa `npm install -g openclaw` una volta sola). Idempotente."""
-    installed, version = await _run_version()
+    installed, version = await _run_version(settings)
     if installed:
         log.info("OpenClaw gia' installato (%s).", version or "versione ignota")
         return True

@@ -61,7 +61,9 @@ class OpenClawProcess:
         if cfg.exists():
             args += ["--config", str(cfg)]
         # risolve lo shim npm (openclaw.cmd su Windows) -> evita WinError 2.
-        argv = exec_argv("openclaw", args)
+        # ARGO_OPENCLAW_BIN, se impostato, ha la precedenza (via di fuga sul PATH).
+        argv = exec_argv("openclaw", args,
+                         explicit=getattr(self.settings, "openclaw_bin", ""))
         return argv if argv is not None else ["openclaw", *args]
 
     def _popen_kwargs(self) -> dict:
