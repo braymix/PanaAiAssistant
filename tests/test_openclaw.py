@@ -99,7 +99,21 @@ def test_exec_argv_plain_executable_posix(monkeypatch):
 
 def test_exec_argv_missing_returns_none(monkeypatch):
     monkeypatch.setattr(openclaw_setup.shutil, "which", lambda n: None)
-    assert openclaw_setup.exec_argv("openclaw", ["x"]) is None
+    # posix + which None -> None (nessun fallback npm su non-Windows)
+    assert openclaw_setup.exec_argv("openclaw", ["x"], is_windows=False) is None
+
+
+def test_exec_argv_falls_back_to_npm_shim(monkeypatch, tmp_path):
+    """PATH stale su Windows: which() None ma lo shim c'e' in %APPDATA%\\npm."""
+    npm = tmp_path / "npm"
+    npm.mkdir()
+    (npm / "openclaw.cmd").write_text("@echo off", encoding="utf-8")
+    monkeypatch.setattr(openclaw_setup.shutil, "which", lambda n: None)
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    argv = openclaw_setup.exec_argv("openclaw", ["gateway"], is_windows=True)
+    assert argv[:2] == ["cmd", "/c"]
+    assert argv[2].endswith("openclaw.cmd")
+    assert argv[-1] == "gateway"
 
 
 def test_setup_workspace_creates_structure(settings, db):

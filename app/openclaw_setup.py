@@ -76,11 +76,35 @@ def exec_argv(name: str, args: list[str],
     if is_windows is None:
         is_windows = os.name == "nt"
     exe = shutil.which(name)
+    if exe is None and is_windows:
+        # PATH del processo Argo "stale" (terminale aperto prima di installare
+        # Node): cerca lo shim nella cartella globale npm standard.
+        exe = _find_npm_shim(name)
     if exe is None:
         return None
     if is_windows and exe.lower().endswith((".cmd", ".bat")):
         return ["cmd", "/c", exe, *args]
     return [exe, *args]
+
+
+def _find_npm_shim(name: str) -> str | None:
+    """Percorso dello shim `<name>.cmd` nella dir globale npm tipica di Windows."""
+    roots: list[Path] = []
+    appdata = os.environ.get("APPDATA")
+    if appdata:
+        roots.append(Path(appdata) / "npm")           # default installer ufficiale
+    prefix = os.environ.get("npm_config_prefix")
+    if prefix:
+        roots.append(Path(prefix))
+    for root in roots:
+        for ext in (".cmd", ".bat", ".exe", ""):
+            cand = root / f"{name}{ext}"
+            try:
+                if cand.exists():
+                    return str(cand)
+            except OSError:
+                continue
+    return None
 
 
 async def _run_version() -> tuple[bool, str | None]:

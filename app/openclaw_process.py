@@ -92,8 +92,14 @@ class OpenClawProcess:
             self.proc = subprocess.Popen(cmd, **self._popen_kwargs())
         except (OSError, ValueError) as e:
             log.error("Avvio OpenClaw fallito (%s): %s", cmd, e)
+            hint = ""
+            if _IS_WIN and getattr(e, "winerror", None) == 2:
+                hint = (" — Windows non trova 'openclaw'. Chiudi TUTTE le finestre "
+                        "PowerShell, aprine una nuova (per aggiornare il PATH) e "
+                        "riavvia Argo. Verifica che `openclaw --version` risponda "
+                        "e che %AppData%\\npm sia nel PATH.")
             await get_bus().emit(None, "openclaw_log", {
-                "line": f"[argo] avvio fallito: {e}", "level": "error",
+                "line": f"[argo] avvio fallito: {e}{hint}", "level": "error",
                 "timestamp": time.time()})
             return False
         self._started_at = time.monotonic()
