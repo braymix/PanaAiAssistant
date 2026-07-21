@@ -30,7 +30,7 @@ from pathlib import Path
 
 from .events import get_bus
 from .ids import new_id
-from .openclaw_setup import _config_path, _pid_file, pid_alive
+from .openclaw_setup import _config_path, _pid_file, exec_argv, pid_alive
 
 log = logging.getLogger("argo.openclaw")
 
@@ -56,11 +56,13 @@ class OpenClawProcess:
     def _build_command(self) -> list[str]:
         if self.command_override is not None:
             return self.command_override
-        cmd = ["openclaw", "gateway", "--port", str(self.gateway_port)]
+        args = ["gateway", "--port", str(self.gateway_port)]
         cfg = _config_path(self.settings)
         if cfg.exists():
-            cmd += ["--config", str(cfg)]
-        return cmd
+            args += ["--config", str(cfg)]
+        # risolve lo shim npm (openclaw.cmd su Windows) -> evita WinError 2.
+        argv = exec_argv("openclaw", args)
+        return argv if argv is not None else ["openclaw", *args]
 
     def _popen_kwargs(self) -> dict:
         kwargs: dict = dict(

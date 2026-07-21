@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -61,13 +62,35 @@ def _openclaw_bin() -> str | None:
     return shutil.which("openclaw")
 
 
+def exec_argv(name: str, args: list[str],
+              is_windows: bool | None = None) -> list[str] | None:
+    """Argv per lanciare un eseguibile risolvendone lo shim.
+
+    Su Windows npm installa i comandi come shim `.cmd`/`.bat`: `subprocess` NON
+    li risolve da solo (fallisce con WinError 2), anche se il comando funziona nel
+    terminale. Qui risolviamo il percorso REALE con `shutil.which` (che applica il
+    PATHEXT) e, se e' uno shim `.cmd`/`.bat`, lo lanciamo via `cmd /c` (CreateProcess
+    non esegue i .cmd direttamente). None se il comando non e' sul PATH.
+
+    `is_windows` e' iniettabile per i test; di default deriva da os.name."""
+    if is_windows is None:
+        is_windows = os.name == "nt"
+    exe = shutil.which(name)
+    if exe is None:
+        return None
+    if is_windows and exe.lower().endswith((".cmd", ".bat")):
+        return ["cmd", "/c", exe, *args]
+    return [exe, *args]
+
+
 async def _run_version() -> tuple[bool, str | None]:
     """`openclaw --version`: (successo, versione). Non solleva."""
-    if _openclaw_bin() is None:
+    argv = exec_argv("openclaw", ["--version"])
+    if argv is None:
         return False, None
     try:
         proc = await asyncio.create_subprocess_exec(
-            "openclaw", "--version",
+            *argv,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
         out, _err = await asyncio.wait_for(proc.communicate(), timeout=10)

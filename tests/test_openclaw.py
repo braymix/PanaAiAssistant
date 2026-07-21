@@ -80,6 +80,28 @@ def test_generate_config_updates_only_models_if_exists(settings, db, monkeypatch
     assert len(doc2["models"]["providers"]["ollama"]["models"]) == 2
 
 
+def test_exec_argv_wraps_windows_cmd_shim(monkeypatch):
+    """Su Windows lo shim npm openclaw.cmd va lanciato via `cmd /c` (subprocess non
+    lo risolve da solo -> WinError 2)."""
+    monkeypatch.setattr(openclaw_setup.shutil, "which",
+                        lambda n: r"C:\Users\x\AppData\Roaming\npm\openclaw.cmd")
+    argv = openclaw_setup.exec_argv("openclaw", ["gateway", "--port", "8766"],
+                                    is_windows=True)
+    assert argv[:3] == ["cmd", "/c", r"C:\Users\x\AppData\Roaming\npm\openclaw.cmd"]
+    assert argv[-3:] == ["gateway", "--port", "8766"]
+
+
+def test_exec_argv_plain_executable_posix(monkeypatch):
+    monkeypatch.setattr(openclaw_setup.shutil, "which", lambda n: "/usr/bin/openclaw")
+    assert openclaw_setup.exec_argv("openclaw", ["gateway"], is_windows=False) == \
+        ["/usr/bin/openclaw", "gateway"]
+
+
+def test_exec_argv_missing_returns_none(monkeypatch):
+    monkeypatch.setattr(openclaw_setup.shutil, "which", lambda n: None)
+    assert openclaw_setup.exec_argv("openclaw", ["x"]) is None
+
+
 def test_setup_workspace_creates_structure(settings, db):
     ws = asyncio.run(openclaw_setup.setup_workspace(settings))
     assert ws.exists()
