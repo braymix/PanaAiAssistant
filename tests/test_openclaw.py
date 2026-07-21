@@ -86,6 +86,89 @@ def test_setup_workspace_creates_structure(settings, db):
     assert (ws / "logs").exists() and (ws / "sessions").exists()
 
 
+# --- auto-download (scaricare OpenClaw da solo) -----------------------------
+def test_ensure_installed_auto_downloads_when_missing(settings, db, monkeypatch):
+    """OpenClaw manca + auto-install ON: ensure_installed SCARICA (chiama
+    _npm_install) e ritorna True dopo la ri-verifica."""
+    settings.openclaw_auto_install = True
+    calls = {"version": 0, "install": 0}
+
+    async def fake_version():
+        calls["version"] += 1
+        # prima chiamata: non installato; dopo l'install: installato.
+        return (calls["install"] > 0), ("openclaw 1.0.0" if calls["install"] else None)
+
+    async def fake_install(_s):
+        calls["install"] += 1
+        return True, None
+
+    monkeypatch.setattr(openclaw_setup, "_run_version", fake_version)
+    monkeypatch.setattr(openclaw_setup, "_npm_install", fake_install)
+    ok = asyncio.run(openclaw_setup.ensure_installed(settings))
+    assert ok is True
+    assert calls["install"] == 1
+
+
+def test_ensure_installed_no_auto_install_does_not_download(settings, db, monkeypatch):
+    """Auto-install OFF: ensure_installed NON scarica, ritorna False."""
+    settings.openclaw_auto_install = False
+    installed_flag = False
+
+    async def fake_version():
+        return installed_flag, None
+
+    async def boom(_s):
+        raise AssertionError("_npm_install non deve essere chiamato con auto-install OFF")
+
+    monkeypatch.setattr(openclaw_setup, "_run_version", fake_version)
+    monkeypatch.setattr(openclaw_setup, "_npm_install", boom)
+    ok = asyncio.run(openclaw_setup.ensure_installed(settings))
+    assert ok is False
+
+
+def test_ensure_installed_already_present_skips_download(settings, db, monkeypatch):
+    """Gia' installato: nessun download, ritorna True subito."""
+    async def fake_version():
+        return True, "openclaw 2.3.4"
+
+    async def boom(_s):
+        raise AssertionError("_npm_install non deve girare se gia' installato")
+
+    monkeypatch.setattr(openclaw_setup, "_run_version", fake_version)
+    monkeypatch.setattr(openclaw_setup, "_npm_install", boom)
+    assert asyncio.run(openclaw_setup.ensure_installed(settings)) is True
+
+
+def test_npm_install_runs_command_and_streams_log(settings, db, monkeypatch):
+    """_npm_install esegue davvero il comando (qui innocuo) e streamma l'output
+    come eventi openclaw_log; exit 0 -> successo."""
+    from app.events import get_bus
+
+    settings.openclaw_install_cmd = "echo scaricando-openclaw"
+    lines: list[str] = []
+
+    bus = get_bus()
+    orig_emit = bus.emit
+
+    async def spy_emit(conv, kind, payload):
+        if kind == "openclaw_log":
+            lines.append(payload.get("line", ""))
+        return await orig_emit(conv, kind, payload)
+
+    monkeypatch.setattr(bus, "emit", spy_emit)
+    ok, err = asyncio.run(openclaw_setup._npm_install(settings))
+    assert ok is True and err is None
+    assert any("scaricando-openclaw" in ln for ln in lines)
+
+
+def test_npm_install_reports_failure_on_nonzero_exit(settings, db):
+    """Comando che fallisce -> (False, 'exit code N'), nessuna eccezione."""
+    settings.openclaw_install_cmd = "exit 3"
+    ok, err = asyncio.run(openclaw_setup._npm_install(settings))
+    assert ok is False
+    assert err and "3" in err
+
+
 # --- processo ---------------------------------------------------------------
 def _fake_cmd() -> list[str]:
     # processo reale ma innocuo: dorme, cosi' resta "vivo" per il test.

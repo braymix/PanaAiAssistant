@@ -158,18 +158,18 @@ perimetro di sicurezza di Argo (nessun PolicyGate: accesso totale a shell, file 
 web). Argo lo avvia/ferma/configura e ne mostra stato e log in dashboard, ma non
 gli impone approvazioni. È **on-demand**: non parte all'avvio di Argo.
 
-Setup (una volta sola):
+Prerequisito: Node.js/npm installati (servono anche per la CLI di Claude Code,
+Fase C). Non serve installare OpenClaw a mano — ci pensa Argo.
 
-```powershell
-npm install -g openclaw     # installazione nativa Windows
-```
+Dalla dashboard, card 🦞 **OpenClaw — PC Agente** → pagina `/openclaw`:
 
-Poi dalla dashboard, card 🦞 **OpenClaw — PC Agente** → pagina `/openclaw`:
-
-1. **Setup / Reinstalla** → Argo crea il workspace
+1. **⬇️ Scarica & Setup** → se OpenClaw manca, Argo lo **scarica da solo**
+   (`npm install -g openclaw`, streaming nel log live); poi crea il workspace
    (`ARGO_OPENCLAW_WORKSPACE`) e genera `config.yaml` popolando **tutti** i
    modelli Ollama installati (interroga `GET {OLLAMA_URL}/api/tags`, niente nomi
    hardcoded), heartbeat off, accesso totale, messaging predisposto ma disattivo.
+   L'auto-download si disattiva con `ARGO_OPENCLAW_AUTO_INSTALL=0` (allora l'install
+   resta manuale: `npm install -g openclaw`).
 2. **Avvia / Ferma / Riavvia** il gateway.
 3. **Invia task**: scrivi cosa deve fare il PC-agente.
 4. **Log live** via SSE.
