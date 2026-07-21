@@ -333,7 +333,7 @@ const Argo = (() => {
     const sel = document.getElementById('project');
     // repo attivo: dal vecchio select se presente, altrimenti dalla pagina Progetti
     const repo = (sel ? sel.value : '') || localStorage.getItem('argo_repo') || '';
-    const r = await jpost('/chat/new', { repo_path: repo, mode: mode || 'generic' });
+    const r = await jpost('/chat/new', { repo_path: repo, mode: mode || 'claudio_codice' });
     const q = repo ? ('?repo=' + encodeURIComponent(repo)) : '';
     location.href = '/chat/' + r.conversation_id + q;
   }
@@ -516,10 +516,101 @@ const Argo = (() => {
     alert('Push attivata.');
   }
 
+  // --- PC Agenti (§C.5): stato live delle card in dashboard ---
+  async function pollAgents() {
+    async function tick() {
+      let list = [];
+      try { list = (await (await fetch('/agents')).json()).agents || []; }
+      catch (e) { return; }
+      list.forEach((a) => {
+        const el = document.querySelector('[data-agent-state="' + a.name + '"]');
+        if (!el) return;
+        const dot = el.querySelector('.dot'); const lbl = el.querySelector('.lbl');
+        dot.classList.toggle('off', !a.running);
+        dot.classList.toggle('on', !!a.running);
+        if (lbl) lbl.textContent = a.running ? 'Attivo' : 'Fermo';
+      });
+    }
+    tick(); setInterval(tick, 5000);
+  }
+
+  // --- pagina agente (OpenClaw): azioni + task + log live via SSE ---
+  function wireAgent(name) {
+    const $ = (id) => document.getElementById(id);
+    const setBusy = (b) => { document.querySelectorAll('.agent-actions .btn')
+      .forEach((x) => { x.disabled = b; }); };
+
+    async function refreshStatus() {
+      try {
+        const s = await (await fetch('/agents/' + name + '/status')).json();
+        const dot = $('ag-dot'), lbl = $('ag-state');
+        if (dot) { dot.classList.toggle('on', !!s.process_running);
+                   dot.classList.toggle('off', !s.process_running); }
+        if (lbl) lbl.textContent = s.installed
+          ? (s.process_running ? '🟢 Attivo' : '🔴 Fermo')
+          : '⚠️ Non installato';
+        const set = (id, v) => { const e = $(id); if (e) e.textContent = (v ?? '—'); };
+        set('ag-version', s.version || '—');
+        set('ag-primary', s.primary_model || '—');
+        set('ag-ollama', s.ollama_connected ? 'connesso' : 'offline');
+      } catch (e) { /* rete giu': riprova al prossimo giro */ }
+    }
+
+    async function act(path, okMsg) {
+      setBusy(true);
+      try { await jpost('/agents/' + name + '/' + path, {}); if (okMsg) toast(okMsg); }
+      catch (e) { alert(e.message); }
+      finally { setBusy(false); refreshStatus(); }
+    }
+    async function ocPost(path, body, okMsg) {
+      setBusy(true);
+      try { const r = await jpost(path, body || {}); if (okMsg) toast(okMsg); return r; }
+      catch (e) { alert(e.message); }
+      finally { setBusy(false); refreshStatus(); }
+    }
+    function toast(m) { const t = $('ag-toast'); if (t) { t.textContent = m;
+      t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2500); } }
+
+    if ($('ag-start')) $('ag-start').onclick = () => act('start', 'Avviato');
+    if ($('ag-stop')) $('ag-stop').onclick = () => act('stop', 'Fermato');
+    if ($('ag-restart')) $('ag-restart').onclick = () => act('restart', 'Riavviato');
+    if ($('ag-setup')) $('ag-setup').onclick = () => ocPost('/openclaw/setup', {}, 'Setup eseguito');
+    if ($('ag-sync')) $('ag-sync').onclick = async () => {
+      const r = await ocPost('/openclaw/config/sync', {}, null);
+      if (r) toast(r.n_models + ' modelli sincronizzati');
+    };
+    if ($('ag-send')) $('ag-send').onclick = async () => {
+      const ta = $('ag-task'); const prompt = (ta.value || '').trim();
+      if (!prompt) { alert('Scrivi un task.'); return; }
+      try { const r = await jpost('/agents/' + name + '/task', { prompt });
+        toast('Task inviato: ' + r.task_id); ta.value = ''; }
+      catch (e) { alert(e.message); }
+    };
+
+    // log live via SSE + pause/resume + auto-scroll
+    const logEl = $('ag-log');
+    let paused = false, es = null;
+    function connect() {
+      es = new EventSource('/agents/' + name + '/logs/stream');
+      es.addEventListener('logline', (e) => {
+        if (paused || !logEl) return;
+        const d = document.createElement('div'); d.className = 'logline';
+        d.textContent = e.data; logEl.appendChild(d);
+        while (logEl.childNodes.length > 800) logEl.removeChild(logEl.firstChild);
+        logEl.scrollTop = logEl.scrollHeight;
+      });
+    }
+    if ($('ag-log-pause')) $('ag-log-pause').onclick = (ev) => {
+      paused = !paused; ev.target.textContent = paused ? '▶ Riprendi' : '⏸ Pausa'; };
+    if (logEl) connect();
+
+    refreshStatus(); setInterval(refreshStatus, 5000);
+  }
+
   // registra il SW ovunque (serve per PWA/push)
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 
-  return { pollStats, subscribeGlobal, appendLog, wireChat, approvePlan,
+  return { pollStats, pollAgents, wireAgent, subscribeGlobal, appendLog, wireChat, approvePlan,
            monitorPlan, renderPlanState, streamRun, newChat, decide, wireInstall, enablePush,
            loadProjects, addProject, newChatWithProject,
            streamOllamaLogs, pollOllamaPs, deleteChat, renameChat,

@@ -16,7 +16,7 @@ from fastapi.templating import Jinja2Templates
 from .config import get_settings
 from .db import init_db
 from .security import IdentityMiddleware
-from .routes import chat, plans, runs, approvals as approvals_route, push as push_route, stats as stats_route, ui, projects as projects_route, ollama as ollama_route, lifecycle as lifecycle_route, documents as documents_route, system as system_route
+from .routes import chat, plans, runs, approvals as approvals_route, push as push_route, stats as stats_route, ui, projects as projects_route, ollama as ollama_route, lifecycle as lifecycle_route, documents as documents_route, system as system_route, openclaw as openclaw_route
 
 HERE = Path(__file__).parent
 STATIC = HERE / "static"
@@ -38,7 +38,33 @@ async def lifespan(app: FastAPI):
                     settings.document_root, e)
     init_db(settings.db_path)
     _sanity_checks(settings)
+    _openclaw_silent_check(settings)
     yield
+
+
+def _openclaw_silent_check(settings) -> None:
+    """Check silenzioso di OpenClaw all'avvio (§B.1): non installa nulla, non crea
+    il workspace (on-demand, §B.4), non blocca lo startup. Solo un log dello stato,
+    eseguito come task di background. Tollerante a qualsiasi errore."""
+    import asyncio
+
+    async def _bg():
+        try:
+            from .openclaw_setup import check_status
+            st = await check_status(settings)
+            if not st.installed:
+                log.info("OpenClaw non installato (on-demand): "
+                         "`npm install -g openclaw` quando vuoi usarlo.")
+            else:
+                log.info("OpenClaw %s pronto (running=%s).",
+                         st.version or "", st.process_running)
+        except Exception as e:  # noqa: BLE001 — mai far fallire lo startup
+            log.debug("OpenClaw silent check saltato: %s", e)
+
+    try:
+        asyncio.ensure_future(_bg())
+    except RuntimeError:
+        pass   # nessun loop (contesto non-async): il check e' opzionale
 
 
 def _sanity_checks(settings) -> None:
@@ -65,6 +91,7 @@ def create_app() -> FastAPI:
 
     app.include_router(ui.router)
     app.include_router(projects_route.router)
+    app.include_router(openclaw_route.router)
     app.include_router(documents_route.router)
     app.include_router(chat.router)
     app.include_router(plans.router)

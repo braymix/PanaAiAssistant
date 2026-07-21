@@ -1,10 +1,9 @@
 {% extends "base.html" %}
-{% block title %}Argo · chat{% endblock %}
-{% set research = conversation and conversation['mode'] == 'research' %}
+{% block title %}Argo · Claudio Codice{% endblock %}
 
-{% block screen_title %}{{ 'Ricerca online' if research else 'Chat generica' }}{% endblock %}
+{% block screen_title %}Claudio Codice{% endblock %}
 {% block header_extra %}
-<span class="mode-chip">{{ '🔎 Ricerca' if research else '💬 Generica' }}</span>
+<span class="mode-chip">💬 Claudio Codice</span>
 {% endblock %}
 
 {% block content_class %}content chat{% endblock %}

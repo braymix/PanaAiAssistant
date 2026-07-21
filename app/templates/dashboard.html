@@ -32,12 +32,12 @@
   </button>
 </section>
 
-<!-- azione n.1: avviare una ricerca (chat in modalità research) -->
-<button class="hero" id="new-research">
-  <span class="chip"><svg class="ic" aria-hidden="true"><use href="/static/icons.svg#ic-search" /></svg></span>
+<!-- azione n.1: nuova chat "Claudio Codice" (pianifica ed esegue sul progetto) -->
+<button class="hero" id="new-claudio">
+  <span class="chip"><svg class="ic" aria-hidden="true"><use href="/static/icons.svg#ic-chat" /></svg></span>
   <span class="body">
-    <span class="t">Nuova ricerca</span>
-    <span class="s">cerca sul web, verifica le fonti, genera un documento</span>
+    <span class="t">Claudio Codice</span>
+    <span class="s">pianifica ed esegue qualsiasi task sul progetto</span>
   </span>
   <svg class="go" aria-hidden="true"><use href="/static/icons.svg#ic-chevron" /></svg>
 </button>
@@ -46,11 +46,6 @@
 <section>
   <div class="recent-head"><span class="section-label">Servizi</span></div>
   <div class="grid">
-    <button class="tile cat-green" id="new-generic">
-      <span class="ic-chip"><svg class="ic" aria-hidden="true"><use href="/static/icons.svg#ic-chat" /></svg></span>
-      <span class="txt"><span class="t">Chat generica</span><span class="s">pianifica ed esegue qualsiasi task</span></span>
-    </button>
-
     <a class="tile cat-violet" href="/plans">
       {% if draft_plans %}<span class="tile-badge bg-violet">{{ draft_plans }} bozza</span>{% endif %}
       <span class="ic-chip"><svg class="ic" aria-hidden="true"><use href="/static/icons.svg#ic-plan" /></svg></span>
@@ -86,6 +81,29 @@
   </div>
 </section>
 
+<!-- PC Agenti (§C.5): itera all_agents(). OpenClaw e' il primo e piu' grande. -->
+{% if agents %}
+<section>
+  <div class="recent-head"><span class="section-label">PC Agenti</span></div>
+  <div class="agents-grid">
+    {% for a in agents %}
+    <a class="agent-card {% if loop.first %}agent-hero{% endif %}"
+       href="{% if a['name'] == 'openclaw' %}/openclaw{% else %}/agents/{{ a['name'] }}{% endif %}"
+       data-agent="{{ a['name'] }}">
+      <span class="agent-ico">{{ a['icon'] }}</span>
+      <span class="agent-body">
+        <span class="t">{% if a['name'] == 'openclaw' %}OpenClaw — PC Agente{% else %}{{ a['name'] }}{% endif %}</span>
+        <span class="s">{{ a['description'] }}</span>
+      </span>
+      <span class="agent-state" data-agent-state="{{ a['name'] }}">
+        <span class="dot off"></span><span class="lbl">…</span>
+      </span>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
 <!-- attività recente -->
 <section>
   <div class="recent-head">
@@ -95,7 +113,7 @@
   <div class="recent">
     {% for c in conversations %}
     <a class="recent-row" href="/chat/{{ c['id'] }}" data-conv="{{ c['id'] }}">
-      <span class="emoji">{% if c['mode'] == 'research' %}🔎{% else %}💬{% endif %}</span>
+      <span class="emoji">💬</span>
       <span class="rt">{{ c['title'] }}</span>
       <span class="time">{{ c['created_at'][11:16] if c['created_at'] else '' }}</span>
       {% set st = c['last_plan_status'] %}
@@ -142,8 +160,8 @@
 {% block scripts %}
 <script>
   Argo.pollStats();
-  document.getElementById('new-research').onclick = () => Argo.newChatWithProject('research');
-  document.getElementById('new-generic').onclick = () => Argo.newChatWithProject('generic');
+  document.getElementById('new-claudio').onclick = () => Argo.newChatWithProject('claudio_codice');
+  Argo.pollAgents();   // stato live (🔴/🟢/⚠️) delle card "PC Agenti"
   document.getElementById('enable-push').onclick = Argo.enablePush;
   Argo.wireQueuePause('queue-pause');   // toggle globale pausa coda (§B.5)
 

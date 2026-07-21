@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% set is_openclaw = name == 'openclaw' %}
+{% block title %}Argo · {% if is_openclaw %}OpenClaw{% else %}{{ name }}{% endif %}{% endblock %}
+
+{% block screen_title %}{{ agent['icon'] if agent else '🤖' }} {% if is_openclaw %}OpenClaw{% else %}{{ name }}{% endif %}{% endblock %}
+{% block header_extra %}
+<span class="mode-chip" id="ag-state"><span class="dot off" id="ag-dot"></span> …</span>
+{% endblock %}
+
+{% block content_class %}content inner agent-page{% endblock %}
+{% block content %}
+
+{% if not agent %}
+<div class="empty">Agente "{{ name }}" non registrato.</div>
+{% else %}
+
+<!-- ⚠️ avviso di sicurezza (§B.3): OpenClaw e' fuori dal perimetro di Argo -->
+{% if is_openclaw %}
+<div class="warn-box">
+  ⚠️ <strong>OpenClaw ha accesso completo al PC</strong> (shell, file, web) senza
+  approvazioni: e' fuori dal perimetro di sicurezza di Argo. Usalo con consapevolezza.
+</div>
+{% endif %}
+
+<!-- header: stato + meta -->
+<section class="agent-meta">
+  <div class="meta-row"><span class="k">Versione</span><span class="v" id="ag-version">—</span></div>
+  <div class="meta-row"><span class="k">Modello primario</span><span class="v" id="ag-primary">—</span></div>
+  <div class="meta-row"><span class="k">Ollama</span><span class="v" id="ag-ollama">—</span></div>
+</section>
+
+<!-- azioni grandi, a portata di pollice -->
+<section class="agent-actions">
+  <button class="btn green" id="ag-start">▶️ Avvia</button>
+  <button class="btn danger" id="ag-stop">⏹️ Ferma</button>
+  <button class="btn" id="ag-restart">🔄 Riavvia</button>
+  {% if is_openclaw %}
+  <button class="btn" id="ag-setup">🔧 Setup / Reinstalla</button>
+  <button class="btn" id="ag-sync">🔄 Sincronizza modelli</button>
+  {% endif %}
+</section>
+
+<!-- campo task -->
+<section class="agent-task">
+  <label class="section-label" for="ag-task">Task per l'agente</label>
+  <textarea id="ag-task" rows="3" placeholder="Cosa vuoi che il PC-agente faccia…"></textarea>
+  <button class="btn green" id="ag-send">Invia task ▶</button>
+</section>
+
+<!-- log live -->
+<section class="agent-logs">
+  <div class="recent-head">
+    <span class="section-label">Log live</span>
+    <button class="btn ghost" id="ag-log-pause">⏸ Pausa</button>
+  </div>
+  <div id="ag-log" class="log-box" aria-live="polite"></div>
+</section>
+
+<!-- integrazioni messaging: PREDISPOSTE, non attive (§B.6) -->
+{% if is_openclaw %}
+<section class="agent-integrations">
+  <div class="recent-head"><span class="section-label">Integrazioni messaging</span></div>
+  <div class="grid">
+    {% for m in [('WhatsApp','🟢'),('Telegram','✈️'),('Slack','💬'),('Discord','🎮')] %}
+    <div class="tile disabled">
+      <span class="ic-chip">{{ m[1] }}</span>
+      <span class="txt"><span class="t">{{ m[0] }}</span><span class="s">Configura quando vuoi</span></span>
+      <label class="switch"><input type="checkbox" disabled /><span class="slider"></span></label>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<div id="ag-toast" class="toast"></div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  {% if agent %}Argo.wireAgent("{{ name }}");{% endif %}
+</script>
+{% endblock %}

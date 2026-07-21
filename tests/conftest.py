@@ -35,6 +35,8 @@ def settings(tmp_path, roots) -> config.Settings:
         approval_timeout_s=2,
         vapid_keys_path=tmp_path / "nope.json",   # niente push nei test
         dev_allow_no_identity=True,
+        # workspace OpenClaw in tmp: MAI il path Windows reale (§Test).
+        openclaw_workspace=tmp_path / "openclaw",
     )
     config.set_settings(s)
     return s

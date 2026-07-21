@@ -269,6 +269,21 @@ class Settings:
     # comando per SPEGNERE il PC. Vuoto = auto per piattaforma (Windows/POSIX).
     poweroff_cmd: str = os.environ.get("ARGO_POWEROFF_CMD", "")
 
+    # --- OpenClaw (modulo "PC Agente") ------------------------------------------
+    # OpenClaw gira come processo SEPARATO, fuori dal perimetro di sicurezza di
+    # Argo (niente PolicyGate): accesso totale al PC, on-demand. Argo lo gestisce
+    # e ne mostra lo stato, ma non gli impone approvazioni.
+    openclaw_workspace: Path = Path(os.environ.get(
+        "ARGO_OPENCLAW_WORKSPACE",
+        r"C:\Users\miche\Desktop\assistant\openclaw-data",
+    ))
+    # modello primario preferito per OpenClaw ("" = primo modello Ollama disponibile).
+    openclaw_primary_model: str = os.environ.get("ARGO_OPENCLAW_PRIMARY_MODEL", "")
+    openclaw_gateway_port: int = int(
+        os.environ.get("ARGO_OPENCLAW_GATEWAY_PORT", "8766"))
+    openclaw_max_concurrent: int = int(
+        os.environ.get("ARGO_OPENCLAW_MAX_CONCURRENT", "2"))
+
     def resolved_roots(self) -> list[Path]:
         """Le root note (document_root + self_root, in testa) piu' le eventuali
         ARGO_ROOTS extra, deduplicate. document_root e' SEMPRE presente: cosi'

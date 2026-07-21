@@ -34,24 +34,6 @@ PLAN_CHAT_SYSTEM = (
     "ogni schermata deve essere utile in 2 secondi in piedi."
 )
 
-# Modalita' RICERCA ONLINE: si APPENDE al system prompt di Claude Code (non lo
-# sostituisce), cosi' plan mode e il resto restano intatti.
-RESEARCH_APPEND = (
-    "MODALITA' RICERCA ONLINE. L'utente vuole un documento di ricerca affidabile "
-    "e aggiornato. Regole:\n"
-    "- Usa ATTIVAMENTE WebSearch per trovare fatti recenti; non fidarti solo della "
-    "memoria, che puo' essere datata.\n"
-    "- Verifica ogni affermazione importante su PIU' fonti indipendenti prima di "
-    "darla per certa. Distingui fatti accertati da ipotesi/indiscrezioni.\n"
-    "- CITA SEMPRE le fonti (titolo + URL) e riporta le date.\n"
-    "- Struttura il risultato come un documento markdown: sommario, sezioni "
-    "tematiche, cronologia, e una sezione 'Fonti' finale con i link.\n"
-    "- Quando produci il PlanDocument, i task locali devono ASSEMBLARE e formattare "
-    "il materiale che TU (planner) hai gia' raccolto e messo nel context di ogni "
-    "TaskBrief: i modelli locali non hanno accesso al web, quindi il contenuto "
-    "verificato deve stare nel brief, non essere 'cercato' da loro."
-)
-
 VIA_SYSTEM = (
     "Produci UN SOLO oggetto JSON valido, senza testo attorno, che rappresenti un "
     "PlanDocument per Argo. Schema:\n"
@@ -159,11 +141,6 @@ def _safe_cwd(repo_cwd: str, settings) -> str:
         return "."
 
 
-def _conversation_mode(db, conversation_id: str) -> str:
-    row = db.query_one("SELECT mode FROM conversation WHERE id=?", (conversation_id,))
-    return (row["mode"] if row and row["mode"] else "generic")
-
-
 def _latest_planner_session(db, conversation_id: str) -> str | None:
     """Ultima sessione del planner per questa conversazione (§1.7 -> resume)."""
     row = db.query_one(
@@ -235,16 +212,11 @@ async def chat_stream(conversation_id: str, repo_cwd: str, user_text: str,
     # continuita' della conversazione: se non passato, riprendi l'ultima sessione
     if resume_session is None:
         resume_session = _latest_planner_session(db, conversation_id)
-    is_research = _conversation_mode(db, conversation_id) == "research"
 
     def _options(resume):
         opts = make_planner_options(settings, repo_cwd, _ask_phone_gate)
         if resume:
             opts.resume = resume
-        # modalita' 'research': APPEND al preset claude_code, non lo sostituisce
-        if is_research:
-            opts.system_prompt = {"type": "preset", "preset": "claude_code",
-                                  "append": RESEARCH_APPEND}
         return opts
 
     # `streamed` accumula i pezzi e fa anche da flag "ho gia' emesso dei delta":
@@ -308,17 +280,9 @@ async def generate_plan(conversation_id: str, repo_path: str,
     # il piano deve riflettere la discussione: riprendi la sessione del planner
     if resume_session is None:
         resume_session = _latest_planner_session(db, conversation_id)
-    research_note = ""
-    if _conversation_mode(db, conversation_id) == "research":
-        research_note = (
-            "MODALITA' RICERCA: i modelli locali NON hanno accesso al web. Percio' "
-            "il contenuto verificato (fatti, date, citazioni, URL delle fonti) che "
-            "hai raccolto DEVE stare INTERO nel campo context di ogni TaskBrief; il "
-            "task locale deve solo formattarlo/assemblarlo, non 'cercarlo'.\n")
 
     via_query = (
         f"Genera ORA il PlanDocument JSON per la feature discussa.\n"
-        f"{research_note}"
         f"Sistema operativo dell'utente: {platform.system()}. Ogni verify_cmd "
         f"DEVE funzionare qui: se Windows, NIENTE test/grep/ls/cat, usa "
         f"python -c \"...\" (vedi regole).\n"
