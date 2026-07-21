@@ -734,6 +734,9 @@ def _parse_verify_exit(output: str) -> int | None:
 def _executor_prompt(brief: TaskBrief) -> str:
     return (
         f"# Task: {brief.title}\n\n"
+        f"AGISCI ORA usando gli strumenti Write/Edit per scrivere i file qui "
+        f"sotto. NON limitarti a descrivere o incollare il contenuto in un "
+        f"messaggio: senza usare i tool il task fallisce.\n\n"
         f"## Contesto\n{brief.context}\n\n"
         f"## Istruzioni (seguile alla lettera)\n{brief.instructions}\n\n"
         f"## File che puoi toccare (SOLO questi)\n"

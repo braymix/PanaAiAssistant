@@ -22,6 +22,21 @@ READONLY_TOOLS = ["Read", "Glob", "Grep"]
 # planner fa le domande come TESTO e l'utente risponde scrivendo in chat.
 PLANNER_DISALLOWED = ["Write", "Edit", "Bash", "NotebookEdit", "AskUserQuestion"]
 
+# System prompt dell'EXECUTOR (sub-agente locale). Senza questa spinta esplicita i
+# modelli locali "parlano" invece di agire: descrivono il file invece di scriverlo.
+# Si APPENDE al preset claude_code, non lo sostituisce.
+EXECUTOR_SYSTEM = (
+    "Sei un agente di coding AUTONOMO, non un assistente conversazionale. Il tuo "
+    "lavoro e' MODIFICARE I FILE con gli strumenti, non parlarne.\n"
+    "- USA gli strumenti Write ed Edit per creare/modificare DAVVERO i file del "
+    "task. Se ti limiti a stampare il contenuto in un messaggio, sul disco non "
+    "cambia NULLA e il task FALLISCE: il risultato conta solo se scritto coi tool.\n"
+    "- NON chiedere conferme e NON proporre piani: agisci subito. Tocca solo i "
+    "file permessi dal task.\n"
+    "- Quando i file sono scritti e il criterio di accettazione e' soddisfatto, "
+    "fermati senza aggiungere spiegazioni."
+)
+
 
 def ollama_env(settings: Settings) -> dict[str, str]:
     return {
@@ -80,6 +95,10 @@ def make_executor_options(settings: Settings, cwd: str, can_use_tool: Callable,
         allowed_tools=list(READONLY_TOOLS),  # §1.8: niente Write/Edit/Bash qui
         can_use_tool=can_use_tool,           # il PolicyGate
         max_turns=max_turns,
+        # spinge il sub-agente ad AGIRE coi tool invece di "parlare" (soprattutto
+        # i modelli locali). APPEND al preset: non sostituisce Claude Code.
+        system_prompt={"type": "preset", "preset": "claude_code",
+                       "append": EXECUTOR_SYSTEM},
     )
     if backend == "ollama":
         kwargs["env"] = ollama_env(settings)  # §1.2

@@ -23,6 +23,11 @@ def test_write_never_in_allowed_tools(settings):
         assert shadowed not in (opts.allowed_tools or []), (
             f"{shadowed} in allowed_tools -> §1.8: il gate non verrebbe mai chiamato")
     assert set(opts.allowed_tools) == set(READONLY_TOOLS)
+    # il sub-agente riceve la spinta ad AGIRE coi tool (append al preset), cosi'
+    # i modelli locali scrivono i file invece di "parlare".
+    sp = opts.system_prompt
+    assert isinstance(sp, dict) and sp.get("preset") == "claude_code"
+    assert "Write" in sp.get("append", "") and "Edit" in sp.get("append", "")
 
 
 def test_write_outside_perimeter_produces_pending_approval(db, settings, roots):
